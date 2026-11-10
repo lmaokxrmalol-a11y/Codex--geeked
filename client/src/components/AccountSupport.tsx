@@ -3,6 +3,10 @@ import { createPortal } from "react-dom";
 import { ArrowRight, LogOut, MessageCircle, UserRound, X } from "lucide-react";
 import { trpc } from "../lib/trpc";
 import { formatPrice } from "../lib/currency";
+import {
+  PAYMENT_METHOD_LABELS,
+  type CheckoutPaymentMethod,
+} from "../../../shared/payments";
 
 type Channel = "system" | "books";
 
@@ -25,6 +29,9 @@ export default function AccountSupport({
   });
   const orders = trpc.commerce.orders.useQuery(undefined, {
     enabled: Boolean(me.data),
+  });
+  const transactions = trpc.commerce.transactions.useQuery(undefined, {
+    enabled: Boolean(role && role !== "user"),
   });
   const login = trpc.auth.login.useMutation();
   const register = trpc.auth.register.useMutation();
@@ -52,6 +59,7 @@ export default function AccountSupport({
       await Promise.all([
         utils.support.list.invalidate(),
         utils.commerce.orders.invalidate(),
+        utils.commerce.transactions.invalidate(),
       ]);
       return;
     }
@@ -330,9 +338,90 @@ export default function AccountSupport({
                   <div className="account-content-grid">
                     <section>
                       <h3>
-                        {role === "user" ? "Your recent orders" : "All orders"}
+                        {role === "user"
+                          ? "Your recent orders"
+                          : "Transactions & orders"}
                       </h3>
-                      {orders.isLoading ? (
+                      {role !== "user" ? (
+                        transactions.isLoading ? (
+                          <p className="account-help">Loading transactions…</p>
+                        ) : transactions.data?.length ? (
+                          <div className="transaction-table-wrap">
+                            <table className="transaction-table">
+                              <thead>
+                                <tr>
+                                  <th>Order</th>
+                                  <th>Customer</th>
+                                  <th>Date</th>
+                                  <th>Total</th>
+                                  <th>Payment</th>
+                                  <th>Payment status</th>
+                                  <th>Order status</th>
+                                  {role === "admin" && <th>Action</th>}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {transactions.data.map(transaction => (
+                                  <tr key={transaction.id}>
+                                    <td>#{transaction.orderId}</td>
+                                    <td>
+                                      {transaction.customerName}
+                                      <small>{transaction.email}</small>
+                                    </td>
+                                    <td>
+                                      {new Date(
+                                        transaction.createdAt
+                                      ).toLocaleDateString()}
+                                    </td>
+                                    <td>
+                                      {formatPrice(
+                                        transaction.amountCents / 100
+                                      )}
+                                    </td>
+                                    <td>
+                                      {PAYMENT_METHOD_LABELS[
+                                        transaction.paymentMethod as CheckoutPaymentMethod
+                                      ] ?? transaction.paymentMethod}
+                                    </td>
+                                    <td>{transaction.status}</td>
+                                    <td>{transaction.orderStatus}</td>
+                                    {role === "admin" && (
+                                      <td>
+                                        {transaction.orderStatus === "paid" && (
+                                          <button
+                                            className="text-button"
+                                            onClick={() =>
+                                              setOrderStatus.mutate(
+                                                {
+                                                  id: transaction.orderId,
+                                                  status: "fulfilled",
+                                                },
+                                                {
+                                                  onSuccess: () =>
+                                                    Promise.all([
+                                                      utils.commerce.orders.invalidate(),
+                                                      utils.commerce.transactions.invalidate(),
+                                                    ]),
+                                                }
+                                              )
+                                            }
+                                          >
+                                            Mark fulfilled
+                                          </button>
+                                        )}
+                                      </td>
+                                    )}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : (
+                          <p className="account-help">
+                            Transactions will appear here after checkout.
+                          </p>
+                        )
+                      ) : orders.isLoading ? (
                         <p className="account-help">Loading orders…</p>
                       ) : orders.data?.length ? (
                         <div className="account-order-list">
@@ -349,6 +438,12 @@ export default function AccountSupport({
                               </div>
                               <span>{formatPrice(order.totalCents / 100)}</span>
                               <small>
+                                {PAYMENT_METHOD_LABELS[
+                                  order.paymentMethod as CheckoutPaymentMethod
+                                ] ?? order.paymentMethod}{" "}
+                                · Payment {order.paymentStatus}
+                              </small>
+                              <small>
                                 Estimated delivery by {order.estimatedDelivery}{" "}
                                 · Philippines
                               </small>
@@ -357,22 +452,6 @@ export default function AccountSupport({
                                   {item.quantity} × {item.title}
                                 </small>
                               ))}
-                              {role === "admin" && order.status === "paid" && (
-                                <button
-                                  className="text-button"
-                                  onClick={() =>
-                                    setOrderStatus.mutate(
-                                      { id: order.id, status: "fulfilled" },
-                                      {
-                                        onSuccess: () =>
-                                          utils.commerce.orders.invalidate(),
-                                      }
-                                    )
-                                  }
-                                >
-                                  Mark fulfilled
-                                </button>
-                              )}
                             </article>
                           ))}
                         </div>

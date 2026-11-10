@@ -339,6 +339,7 @@ export async function createOrder(input: {
   address: string;
   city: string;
   postcode: string;
+  paymentMethod: import("../shared/payments").CheckoutPaymentMethod;
   userId?: number;
 }) {
   const db = await getDb();
@@ -375,6 +376,7 @@ export async function createOrder(input: {
         shippingCents,
         totalCents,
         estimatedDelivery: estimateDeliveryDate(),
+        paymentMethod: input.paymentMethod,
       });
       return {
         orderId,
@@ -382,6 +384,7 @@ export async function createOrder(input: {
         shippingCents,
         totalCents,
         items,
+        paymentMethod: input.paymentMethod,
         localOnly: true,
       };
     }
@@ -391,6 +394,7 @@ export async function createOrder(input: {
       subtotalCents,
       shippingCents,
       totalCents,
+      paymentMethod: input.paymentMethod,
       localOnly: true,
     };
   }
@@ -426,6 +430,7 @@ export async function createOrder(input: {
       shippingCents,
       totalCents,
       estimatedDelivery: estimateDeliveryDate(),
+      paymentMethod: input.paymentMethod,
     });
     return {
       orderId,
@@ -433,6 +438,7 @@ export async function createOrder(input: {
       shippingCents,
       totalCents,
       items,
+      paymentMethod: input.paymentMethod,
       localOnly: false,
     };
   }
@@ -454,12 +460,15 @@ export async function createOrder(input: {
       quantity: line.cart.quantity,
     }))
   );
-  await db.delete(cartItems).where(eq(cartItems.sessionId, input.sessionId));
+  if (!input.userId) {
+    await db.delete(cartItems).where(eq(cartItems.sessionId, input.sessionId));
+  }
   return {
     orderId,
     subtotalCents,
     shippingCents,
     totalCents,
+    paymentMethod: input.paymentMethod,
     localOnly: false,
   };
 }

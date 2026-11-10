@@ -16,6 +16,7 @@ import {
 } from "./_core/trpc";
 import {
   cancelLocalOrder,
+  completeLocalSandboxPayment,
   createEmployee,
   createLocalSession,
   createLocalUser,
@@ -26,6 +27,7 @@ import {
   loginLocalUser,
   listConversations,
   listOrders,
+  listTransactions,
   replyToConversation,
   setConversationStatus,
   setOrderStatus,
@@ -33,6 +35,7 @@ import {
   type LocalUser,
 } from "./localStore";
 import { assertPaymentsConfigured, createHostedCheckout } from "./payments";
+import { CHECKOUT_PAYMENT_METHODS } from "../shared/payments";
 import {
   addToCart,
   clearCart,
@@ -192,6 +195,9 @@ export const appRouter = router({
     orders: protectedProcedure.query(({ ctx }) =>
       listOrders(assertLocalUser(ctx.user))
     ),
+    transactions: protectedProcedure.query(({ ctx }) =>
+      listTransactions(assertLocalUser(ctx.user))
+    ),
     order: protectedProcedure
       .input(z.object({ id: z.number().int().positive() }))
       .query(({ ctx, input }) => {
@@ -269,6 +275,7 @@ export const appRouter = router({
             .string()
             .trim()
             .regex(/^\d{4}$/, "Enter a 4-digit Philippine postal code"),
+          paymentMethod: z.enum(CHECKOUT_PAYMENT_METHODS),
         })
       )
       .mutation(async ({ ctx, input }) => {
@@ -280,38 +287,75 @@ export const appRouter = router({
           });
         }
         let orderId: number | undefined;
+        let checkoutSessionCreated = false;
         try {
-          assertPaymentsConfigured();
+          if (
+            input.paymentMethod === "sandbox" &&
+            process.env.NODE_ENV !== "development"
+          ) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "Direct Sandbox Test is available only in development",
+            });
+          }
+          const onlinePaymentMethod =
+            input.paymentMethod === "sandbox" ? null : input.paymentMethod;
+          const useLocalPayment =
+            onlinePaymentMethod === null ||
+            (!process.env.PAYMONGO_SECRET_KEY &&
+              process.env.NODE_ENV === "development");
+          if (!useLocalPayment) assertPaymentsConfigured();
           const order = await createOrder({
             ...input,
             userId: user.id,
             email: user.email,
           });
           orderId = order.orderId;
+          if (useLocalPayment) {
+            if (!completeLocalSandboxPayment(orderId)) {
+              throw new Error("Could not complete the local test payment");
+            }
+            await clearCart(input.sessionId);
+            return {
+              ...order,
+              checkoutUrl: null,
+              simulated: true,
+              estimatedDelivery: estimateDelivery(orderId, user),
+            };
+          }
+          if (!onlinePaymentMethod) {
+            throw new Error("An online payment method is required");
+          }
           const checkout = await createHostedCheckout({
             orderId,
             amountCents: order.totalCents,
             email: user.email,
+            paymentMethod: onlinePaymentMethod,
           });
           attachCheckoutSession(
             orderId,
             checkout.sessionId,
             checkout.checkoutUrl
           );
+          checkoutSessionCreated = true;
           await clearCart(input.sessionId);
           return {
             ...order,
             checkoutUrl: checkout.checkoutUrl,
+            simulated: false,
             estimatedDelivery: estimateDelivery(orderId, user),
           };
         } catch (error) {
-          if (orderId) cancelLocalOrder(orderId);
+          if (orderId && !checkoutSessionCreated) cancelLocalOrder(orderId);
           if (
             error instanceof Error &&
             (error.message === "Your cart is empty" ||
               error.message.startsWith("Payments are not configured") ||
               error.message.startsWith("Set ") ||
-              error.message.startsWith("PAYMONGO_"))
+              error.message.startsWith("PAYMONGO_") ||
+              error.message.includes(
+                "is not enabled in PAYMONGO_PAYMENT_METHOD_TYPES"
+              ))
           ) {
             throw new TRPCError({
               code: "BAD_REQUEST",

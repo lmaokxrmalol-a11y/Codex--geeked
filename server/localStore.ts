@@ -8,6 +8,7 @@ import { mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
+import type { CheckoutPaymentMethod } from "../shared/payments";
 
 const scrypt = promisify(scryptCallback);
 const { DatabaseSync } = createRequire(import.meta.url)(
@@ -72,6 +73,23 @@ database.exec(`
     checkout_url TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
+  CREATE TABLE IF NOT EXISTS local_transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL UNIQUE REFERENCES local_orders(id) ON DELETE CASCADE,
+    amount_cents INTEGER NOT NULL,
+    payment_method TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'completed', 'failed', 'cancelled')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  INSERT INTO local_transactions (order_id, amount_cents, payment_method, status, created_at)
+    SELECT id, total_cents, COALESCE(payment_method, 'unknown'),
+      CASE status WHEN 'paid' THEN 'completed' WHEN 'cancelled' THEN 'cancelled' ELSE 'pending' END,
+      created_at
+    FROM local_orders
+    WHERE NOT EXISTS (
+      SELECT 1 FROM local_transactions WHERE local_transactions.order_id = local_orders.id
+    );
 `);
 
 export type LocalRole = "user" | "employee" | "admin";
@@ -513,35 +531,51 @@ export type LocalOrderInput = {
   shippingCents: number;
   totalCents: number;
   estimatedDelivery: string;
+  paymentMethod: CheckoutPaymentMethod | "unknown";
 };
 
 export function saveLocalOrder(input: LocalOrderInput) {
-  const result = database
-    .prepare(
-      `
-    INSERT INTO local_orders (user_id, first_name, last_name, email, address, city, postcode, items_json,
-      subtotal_cents, shipping_cents, total_cents, estimated_delivery)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `
-    )
-    .run(
-      input.userId,
-      input.firstName,
-      input.lastName,
-      input.email,
-      input.address,
-      input.city,
-      input.postcode,
-      JSON.stringify(input.items),
-      input.subtotalCents,
-      input.shippingCents,
-      input.totalCents,
-      input.estimatedDelivery
-    );
-  return Number(result.lastInsertRowid);
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    const result = database
+      .prepare(
+        `
+      INSERT INTO local_orders (user_id, first_name, last_name, email, address, city, postcode, items_json,
+        subtotal_cents, shipping_cents, total_cents, estimated_delivery, payment_method)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `
+      )
+      .run(
+        input.userId,
+        input.firstName,
+        input.lastName,
+        input.email,
+        input.address,
+        input.city,
+        input.postcode,
+        JSON.stringify(input.items),
+        input.subtotalCents,
+        input.shippingCents,
+        input.totalCents,
+        input.estimatedDelivery,
+        input.paymentMethod
+      );
+    const orderId = Number(result.lastInsertRowid);
+    database
+      .prepare(
+        "INSERT INTO local_transactions (order_id, amount_cents, payment_method, status) VALUES (?, ?, ?, 'pending')"
+      )
+      .run(orderId, input.totalCents, input.paymentMethod);
+    database.exec("COMMIT");
+    return orderId;
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 function formatOrder(row: Record<string, unknown>) {
+  const paymentMethod = row.transaction_payment_method ?? row.payment_method;
   return {
     id: Number(row.id),
     firstName: String(row.first_name),
@@ -556,32 +590,88 @@ function formatOrder(row: Record<string, unknown>) {
     shippingCents: Number(row.shipping_cents),
     totalCents: Number(row.total_cents),
     estimatedDelivery: String(row.estimated_delivery),
-    paymentMethod: row.payment_method ? String(row.payment_method) : null,
+    paymentMethod: paymentMethod ? String(paymentMethod) : null,
+    paymentStatus: row.transaction_status
+      ? String(row.transaction_status)
+      : row.status === "paid"
+        ? "completed"
+        : "pending",
+    transactionId: row.transaction_id ? Number(row.transaction_id) : null,
+    transactionCreatedAt: row.transaction_created_at
+      ? String(row.transaction_created_at)
+      : String(row.created_at),
     checkoutUrl: row.checkout_url ? String(row.checkout_url) : null,
     createdAt: String(row.created_at),
   };
 }
 
 export function listOrders(user: LocalUser) {
-  const rows =
-    user.role === "user"
-      ? database
-          .prepare(
-            "SELECT * FROM local_orders WHERE user_id = ? ORDER BY id DESC"
-          )
-          .all(user.id)
-      : database.prepare("SELECT * FROM local_orders ORDER BY id DESC").all();
+  const rows = database
+    .prepare(
+      `
+      SELECT o.*, t.id AS transaction_id, t.payment_method AS transaction_payment_method,
+        t.status AS transaction_status, t.created_at AS transaction_created_at
+      FROM local_orders o
+      LEFT JOIN local_transactions t ON t.order_id = o.id
+      ${user.role === "user" ? "WHERE o.user_id = ?" : ""}
+      ORDER BY o.id DESC
+    `
+    )
+    .all(...(user.role === "user" ? [user.id] : []));
   return (rows as Record<string, unknown>[]).map(formatOrder);
+}
+
+export function listTransactions(user: LocalUser) {
+  const rows = database
+    .prepare(
+      `
+      SELECT t.id, t.order_id AS orderId, t.amount_cents AS amountCents,
+        t.payment_method AS paymentMethod, t.status, t.created_at AS createdAt,
+        o.status AS orderStatus, o.email, o.first_name AS firstName,
+        o.last_name AS lastName, o.estimated_delivery AS estimatedDelivery
+      FROM local_transactions t
+      JOIN local_orders o ON o.id = t.order_id
+      ${user.role === "user" ? "WHERE o.user_id = ?" : ""}
+      ORDER BY t.id DESC
+    `
+    )
+    .all(...(user.role === "user" ? [user.id] : []));
+  return (rows as Record<string, unknown>[]).map(row => ({
+    id: Number(row.id),
+    orderId: Number(row.orderId),
+    amountCents: Number(row.amountCents),
+    paymentMethod: String(row.paymentMethod),
+    status: String(row.status),
+    orderStatus: String(row.orderStatus),
+    email: String(row.email),
+    customerName: `${String(row.firstName)} ${String(row.lastName)}`,
+    estimatedDelivery: String(row.estimatedDelivery),
+    createdAt: String(row.createdAt),
+  }));
 }
 
 export function getOrderForUser(orderId: number, user: LocalUser) {
   const row =
     user.role === "user"
       ? database
-          .prepare("SELECT * FROM local_orders WHERE id = ? AND user_id = ?")
+          .prepare(
+            `SELECT o.*, t.id AS transaction_id,
+              t.payment_method AS transaction_payment_method,
+              t.status AS transaction_status,
+              t.created_at AS transaction_created_at
+             FROM local_orders o LEFT JOIN local_transactions t ON t.order_id = o.id
+             WHERE o.id = ? AND o.user_id = ?`
+          )
           .get(orderId, user.id)
       : database
-          .prepare("SELECT * FROM local_orders WHERE id = ?")
+          .prepare(
+            `SELECT o.*, t.id AS transaction_id,
+              t.payment_method AS transaction_payment_method,
+              t.status AS transaction_status,
+              t.created_at AS transaction_created_at
+             FROM local_orders o LEFT JOIN local_transactions t ON t.order_id = o.id
+             WHERE o.id = ?`
+          )
           .get(orderId);
   return row ? formatOrder(row as Record<string, unknown>) : null;
 }
@@ -599,20 +689,106 @@ export function attachCheckoutSession(
 }
 
 export function cancelLocalOrder(orderId: number) {
-  database
-    .prepare(
-      "UPDATE local_orders SET status = 'cancelled', checkout_url = NULL WHERE id = ? AND status = 'pending'"
-    )
-    .run(orderId);
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    database
+      .prepare(
+        "UPDATE local_orders SET status = 'cancelled', checkout_url = NULL WHERE id = ? AND status = 'pending'"
+      )
+      .run(orderId);
+    database
+      .prepare(
+        "UPDATE local_transactions SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE order_id = ? AND status = 'pending'"
+      )
+      .run(orderId);
+    database.exec("COMMIT");
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 export function markOrderPaid(orderId: number, sessionId: string) {
-  const result = database
-    .prepare(
-      "UPDATE local_orders SET status = 'paid', payment_session_id = ?, checkout_url = NULL WHERE id = ? AND payment_session_id = ? AND status = 'pending'"
-    )
-    .run(sessionId, orderId, sessionId);
-  return Number(result.changes) > 0;
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    const row = database
+      .prepare(
+        "SELECT status, payment_session_id FROM local_orders WHERE id = ?"
+      )
+      .get(orderId) as
+      | { status: string; payment_session_id: string | null }
+      | undefined;
+    if (row?.status === "paid" && row.payment_session_id === sessionId) {
+      database.exec("COMMIT");
+      return true;
+    }
+    if (
+      !row ||
+      row.status !== "pending" ||
+      row.payment_session_id !== sessionId
+    ) {
+      database.exec("ROLLBACK");
+      return false;
+    }
+    database
+      .prepare(
+        "UPDATE local_orders SET status = 'paid', checkout_url = NULL WHERE id = ?"
+      )
+      .run(orderId);
+    database
+      .prepare(
+        "UPDATE local_transactions SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE order_id = ? AND status = 'pending'"
+      )
+      .run(orderId);
+    database.exec("COMMIT");
+    return true;
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+export function completeLocalSandboxPayment(orderId: number) {
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    const row = database
+      .prepare(
+        `SELECT o.status, o.payment_session_id, t.status AS transaction_status
+         FROM local_orders o JOIN local_transactions t ON t.order_id = o.id
+         WHERE o.id = ?`
+      )
+      .get(orderId) as
+      | {
+          status: string;
+          payment_session_id: string | null;
+          transaction_status: string;
+        }
+      | undefined;
+    if (
+      !row ||
+      row.status !== "pending" ||
+      row.payment_session_id !== null ||
+      row.transaction_status !== "pending"
+    ) {
+      database.exec("ROLLBACK");
+      return false;
+    }
+    database
+      .prepare(
+        "UPDATE local_orders SET status = 'paid' WHERE id = ? AND status = 'pending'"
+      )
+      .run(orderId);
+    database
+      .prepare(
+        "UPDATE local_transactions SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE order_id = ?"
+      )
+      .run(orderId);
+    database.exec("COMMIT");
+    return true;
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 export function setOrderStatus(
@@ -622,4 +798,17 @@ export function setOrderStatus(
   database
     .prepare("UPDATE local_orders SET status = ? WHERE id = ?")
     .run(status, orderId);
+  if (status === "cancelled") {
+    database
+      .prepare(
+        "UPDATE local_transactions SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE order_id = ? AND status = 'pending'"
+      )
+      .run(orderId);
+  } else if (status === "paid") {
+    database
+      .prepare(
+        "UPDATE local_transactions SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE order_id = ? AND status = 'pending'"
+      )
+      .run(orderId);
+  }
 }

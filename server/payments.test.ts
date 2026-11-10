@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  createHostedCheckout,
   getPaymentMethods,
   parsePaidCheckoutEvent,
   verifyPayMongoWebhook,
@@ -44,5 +45,62 @@ describe("PayMongo checkout helpers", () => {
     expect(
       parsePaidCheckoutEvent({ data: { type: "payment.failed" } })
     ).toBeNull();
+  });
+
+  it("creates PayMongo checkout sessions for only the selected enabled method", async () => {
+    vi.stubEnv("PAYMONGO_SECRET_KEY", "sk_test_example");
+    vi.stubEnv("PAYMONGO_WEBHOOK_SECRET", "webhook-test-secret");
+    vi.stubEnv("PAYMONGO_MODE", "test");
+    vi.stubEnv("PAYMONGO_PAYMENT_METHOD_TYPES", "card,gcash,qrph");
+    vi.stubEnv("PUBLIC_APP_URL", "https://leaflore.example");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: {
+            id: "cs_test_1",
+            attributes: {
+              checkout_url: "https://checkout.paymongo.com/cs_test_1",
+            },
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      createHostedCheckout({
+        orderId: 42,
+        amountCents: 89800,
+        email: "reader@example.test",
+        paymentMethod: "gcash",
+      })
+    ).resolves.toEqual({
+      sessionId: "cs_test_1",
+      checkoutUrl: "https://checkout.paymongo.com/cs_test_1",
+    });
+
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(requestBody.data.attributes.payment_method_types).toEqual(["gcash"]);
+    expect(requestBody.data.attributes.success_url).toBe(
+      "https://leaflore.example/order-success/42?payment=return"
+    );
+  });
+
+  it("does not start a checkout for a method disabled in merchant settings", async () => {
+    vi.stubEnv("PAYMONGO_SECRET_KEY", "sk_test_example");
+    vi.stubEnv("PAYMONGO_WEBHOOK_SECRET", "webhook-test-secret");
+    vi.stubEnv("PAYMONGO_MODE", "test");
+    vi.stubEnv("PAYMONGO_PAYMENT_METHOD_TYPES", "card");
+    vi.stubEnv("PUBLIC_APP_URL", "https://leaflore.example");
+
+    await expect(
+      createHostedCheckout({
+        orderId: 42,
+        amountCents: 89800,
+        email: "reader@example.test",
+        paymentMethod: "gcash",
+      })
+    ).rejects.toThrow("not enabled");
   });
 });

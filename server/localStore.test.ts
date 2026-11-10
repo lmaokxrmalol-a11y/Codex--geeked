@@ -7,10 +7,14 @@ import {
   getLocalSessionUser,
   listConversations,
   listOrders,
+  listTransactions,
   loginLocalUser,
   replyToConversation,
   saveLocalOrder,
   seedLocalTestAccounts,
+  completeLocalSandboxPayment,
+  attachCheckoutSession,
+  markOrderPaid,
 } from "./localStore";
 
 const uniqueEmail = (label: string) =>
@@ -80,10 +84,12 @@ describe("local accounts and support", () => {
       else process.env.LOCAL_TEST_ADMIN_PASSWORD = originalPasswords.admin;
       if (originalPasswords.employee === undefined)
         delete process.env.LOCAL_TEST_EMPLOYEE_PASSWORD;
-      else process.env.LOCAL_TEST_EMPLOYEE_PASSWORD = originalPasswords.employee;
+      else
+        process.env.LOCAL_TEST_EMPLOYEE_PASSWORD = originalPasswords.employee;
       if (originalPasswords.customer === undefined)
         delete process.env.LOCAL_TEST_CUSTOMER_PASSWORD;
-      else process.env.LOCAL_TEST_CUSTOMER_PASSWORD = originalPasswords.customer;
+      else
+        process.env.LOCAL_TEST_CUSTOMER_PASSWORD = originalPasswords.customer;
     }
   });
 
@@ -135,7 +141,7 @@ describe("local accounts and support", () => {
         .messages
     ).toHaveLength(3);
     expect(listOrders(customer)).toEqual([]);
-    saveLocalOrder({
+    const orderId = saveLocalOrder({
       userId: customer.id,
       firstName: "Support",
       lastName: "Customer",
@@ -155,8 +161,61 @@ describe("local accounts and support", () => {
       shippingCents: 9900,
       totalCents: 59900,
       estimatedDelivery: "2026-04-01",
+      paymentMethod: "sandbox",
     });
     expect(listOrders(customer)).toHaveLength(1);
     expect(listOrders(employee)).toHaveLength(1);
+    expect(listTransactions(customer)).toMatchObject([
+      {
+        orderId,
+        amountCents: 59900,
+        paymentMethod: "sandbox",
+        status: "pending",
+        orderStatus: "pending",
+      },
+    ]);
+    expect(completeLocalSandboxPayment(orderId)).toBe(true);
+    expect(completeLocalSandboxPayment(orderId)).toBe(false);
+    expect(listOrders(customer)[0]).toMatchObject({
+      id: orderId,
+      status: "paid",
+      paymentStatus: "completed",
+      paymentMethod: "sandbox",
+    });
+    expect(listTransactions(employee)[0]).toMatchObject({
+      orderId,
+      amountCents: 59900,
+      status: "completed",
+      orderStatus: "paid",
+    });
+
+    const onlineOrderId = saveLocalOrder({
+      userId: customer.id,
+      firstName: "Support",
+      lastName: "Customer",
+      email: customer.email,
+      address: "1 Test Street",
+      city: "Manila",
+      postcode: "1000",
+      items: [],
+      subtotalCents: 50000,
+      shippingCents: 9900,
+      totalCents: 59900,
+      estimatedDelivery: "2026-04-01",
+      paymentMethod: "gcash",
+    });
+    attachCheckoutSession(
+      onlineOrderId,
+      "cs_test_store_order",
+      "https://checkout.paymongo.com/cs_test_store_order"
+    );
+    expect(markOrderPaid(onlineOrderId, "wrong-session")).toBe(false);
+    expect(markOrderPaid(onlineOrderId, "cs_test_store_order")).toBe(true);
+    expect(markOrderPaid(onlineOrderId, "cs_test_store_order")).toBe(true);
+    expect(listTransactions(customer)[0]).toMatchObject({
+      orderId: onlineOrderId,
+      paymentMethod: "gcash",
+      status: "completed",
+    });
   });
 });

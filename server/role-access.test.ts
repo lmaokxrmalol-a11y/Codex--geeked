@@ -1,7 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
-import { createLocalUser, getLocalSessionUser } from "./localStore";
+import {
+  createLocalUser,
+  getLocalSessionUser,
+  listOrders,
+  listTransactions,
+} from "./localStore";
+import { addToCart, getStoreState } from "./db";
+
+afterEach(() => vi.unstubAllEnvs());
 
 function createContext(user: NonNullable<TrpcContext["user"]>): TrpcContext {
   return {
@@ -127,4 +135,111 @@ describe("role-based account procedures", () => {
       });
     }
   );
+
+  it("completes development checkout locally and records a transaction", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("DATABASE_URL", "");
+    vi.stubEnv("PAYMONGO_SECRET_KEY", "");
+    const customer = await createLocalUser({
+      name: "Checkout Customer",
+      email: `checkout-${crypto.randomUUID()}@example.test`,
+      password: "checkout-test-password",
+      role: "user",
+    });
+    const sessionId = `checkout-${crypto.randomUUID()}`;
+    await addToCart(sessionId, "project-hail-mary", 1);
+
+    const result = await appRouter
+      .createCaller(createContext(customer))
+      .checkout.createOrder({
+        sessionId,
+        firstName: "Checkout",
+        lastName: "Customer",
+        email: customer.email,
+        address: "12 Mabini Street",
+        city: "Manila",
+        postcode: "1000",
+        paymentMethod: "gcash",
+      });
+
+    expect(result).toMatchObject({
+      paymentMethod: "gcash",
+      simulated: true,
+      checkoutUrl: null,
+    });
+    expect(listOrders(customer)[0]).toMatchObject({
+      id: result.orderId,
+      status: "paid",
+      paymentStatus: "completed",
+      paymentMethod: "gcash",
+    });
+    expect(listTransactions(customer)[0]).toMatchObject({
+      orderId: result.orderId,
+      amountCents: result.totalCents,
+      paymentMethod: "gcash",
+      status: "completed",
+    });
+    expect((await getStoreState(sessionId)).cart).toEqual([]);
+  });
+
+  it("rejects direct sandbox checkout outside development", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("DATABASE_URL", "");
+    const customer = await createLocalUser({
+      name: "Sandbox Block Customer",
+      email: `sandbox-${crypto.randomUUID()}@example.test`,
+      password: "checkout-test-password",
+      role: "user",
+    });
+    const sessionId = `sandbox-${crypto.randomUUID()}`;
+    await addToCart(sessionId, "project-hail-mary", 1);
+
+    await expect(
+      appRouter.createCaller(createContext(customer)).checkout.createOrder({
+        sessionId,
+        firstName: "Sandbox",
+        lastName: "Block",
+        email: customer.email,
+        address: "12 Mabini Street",
+        city: "Manila",
+        postcode: "1000",
+        paymentMethod: "sandbox",
+      })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Direct Sandbox Test is available only in development",
+    });
+  });
+
+  it("requires PayMongo for online checkout in production", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("DATABASE_URL", "");
+    vi.stubEnv("PAYMONGO_SECRET_KEY", "");
+    const customer = await createLocalUser({
+      name: "Production Checkout Customer",
+      email: `production-checkout-${crypto.randomUUID()}@example.test`,
+      password: "checkout-test-password",
+      role: "user",
+    });
+    const sessionId = `production-checkout-${crypto.randomUUID()}`;
+    await addToCart(sessionId, "project-hail-mary", 1);
+
+    await expect(
+      appRouter.createCaller(createContext(customer)).checkout.createOrder({
+        sessionId,
+        firstName: "Production",
+        lastName: "Customer",
+        email: customer.email,
+        address: "12 Mabini Street",
+        city: "Manila",
+        postcode: "1000",
+        paymentMethod: "gcash",
+      })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: expect.stringContaining("Payments are not configured"),
+    });
+    expect(listOrders(customer)).toEqual([]);
+    expect((await getStoreState(sessionId)).cart).toHaveLength(1);
+  });
 });

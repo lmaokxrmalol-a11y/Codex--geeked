@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
+import { type OnlinePaymentMethod } from "../shared/payments";
 
 const checkoutResponseSchema = z.object({
   data: z.object({
@@ -94,8 +95,14 @@ export async function createHostedCheckout(input: {
   orderId: number;
   amountCents: number;
   email: string;
+  paymentMethod: OnlinePaymentMethod;
 }) {
   const secretKey = assertPaymentsConfigured();
+  if (!getPaymentMethods().includes(input.paymentMethod)) {
+    throw new Error(
+      `${input.paymentMethod} is not enabled in PAYMONGO_PAYMENT_METHOD_TYPES`
+    );
+  }
   const baseUrl = getPublicAppUrl();
   const response = await fetch(
     "https://api.paymongo.com/v2/checkout_sessions",
@@ -110,14 +117,14 @@ export async function createHostedCheckout(input: {
           attributes: {
             line_items: [
               {
-                name: `codex-geeked order #${input.orderId}`,
+                name: `Leaflore order #${input.orderId}`,
                 amount: input.amountCents,
                 currency: "PHP",
                 quantity: 1,
               },
             ],
-            payment_method_types: getPaymentMethods(),
-            success_url: `${baseUrl}/?payment=return&order=${input.orderId}`,
+            payment_method_types: [input.paymentMethod],
+            success_url: `${baseUrl}/order-success/${input.orderId}?payment=return`,
             cancel_url: `${baseUrl}/?payment=cancel&order=${input.orderId}`,
             reference_number: `ORDER-${input.orderId}`,
             send_email_receipt: true,

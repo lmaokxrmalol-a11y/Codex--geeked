@@ -56,6 +56,7 @@ describe("codex-geeked catalog", () => {
       address: "12 Mabini Street",
       city: "Manila",
       postcode: "1000",
+      paymentMethod: "sandbox",
     });
     expect(order).toMatchObject({
       subtotalCents: 79900,

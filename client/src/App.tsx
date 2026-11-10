@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronLeft,
+  CreditCard,
   Gift,
   Heart,
   Leaf,
@@ -14,6 +15,7 @@ import {
   Search,
   ShieldCheck,
   ShoppingBag,
+  Smartphone,
   Sparkles,
   Star,
   Trash2,
@@ -33,6 +35,11 @@ import {
 } from "./data/books";
 import { trpc } from "./lib/trpc";
 import { formatPrice } from "./lib/currency";
+import {
+  CHECKOUT_PAYMENT_METHODS,
+  PAYMENT_METHOD_LABELS,
+  type CheckoutPaymentMethod,
+} from "../../shared/payments";
 
 type SortOption = "featured" | "rating" | "newest" | "price-low" | "price-high";
 type PriceFilter = "all" | "under-700" | "700-1200" | "over-1200";
@@ -44,6 +51,107 @@ function getBookshopSessionId() {
   const sessionId = `${crypto.randomUUID()}-${Date.now()}`;
   window.localStorage.setItem(storageKey, sessionId);
   return sessionId;
+}
+
+function OrderConfirmation({ orderId }: { orderId: number }) {
+  const orderQuery = trpc.commerce.order.useQuery(
+    { id: orderId },
+    {
+      retry: false,
+      refetchInterval: query =>
+        query.state.data?.paymentStatus === "pending" ? 3000 : false,
+    }
+  );
+  const order = orderQuery.data;
+  const simulated =
+    new URLSearchParams(window.location.search).get("simulated") === "true";
+
+  return (
+    <main className="order-confirmation page-width">
+      <div className="order-confirmation__card">
+        <span className="order-confirmation__icon">
+          <CheckCircle2 size={28} />
+        </span>
+        <p className="eyebrow">
+          <span className="eyebrow__line" /> Leaflore order
+        </p>
+        <h1>
+          {orderQuery.isPending
+            ? "Loading your order…"
+            : orderQuery.isError
+              ? "We couldn’t load this order."
+              : order?.status === "paid"
+                ? "Your order is confirmed."
+                : "Payment confirmation is pending."}
+        </h1>
+        {orderQuery.isError ? (
+          <p className="order-confirmation__message">
+            Sign in with the customer account that placed this order, then check
+            My Orders.
+          </p>
+        ) : order ? (
+          <>
+            <p className="order-confirmation__message">
+              Order #{order.id} ·{" "}
+              {order.paymentStatus === "completed"
+                ? simulated
+                  ? "Local sandbox payment completed"
+                  : "Payment completed"
+                : "Waiting for PayMongo to verify payment"}
+            </p>
+            <div className="order-confirmation__details">
+              <div>
+                <span>Payment method</span>
+                <strong>
+                  {PAYMENT_METHOD_LABELS[
+                    order.paymentMethod as CheckoutPaymentMethod
+                  ] ?? order.paymentMethod}
+                </strong>
+              </div>
+              <div>
+                <span>Payment status</span>
+                <strong>{order.paymentStatus}</strong>
+              </div>
+              <div>
+                <span>Total</span>
+                <strong>{formatPrice(order.totalCents / 100)}</strong>
+              </div>
+              <div>
+                <span>Estimated delivery</span>
+                <strong>{order.estimatedDelivery}</strong>
+              </div>
+            </div>
+            <ul className="order-confirmation__items">
+              {order.items.map(item => (
+                <li key={item.bookId}>
+                  <span>
+                    {item.quantity} × {item.title}
+                  </span>
+                  <strong>
+                    {formatPrice((item.priceCents * item.quantity) / 100)}
+                  </strong>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : null}
+        <div className="order-confirmation__actions">
+          <button
+            className="button button--primary"
+            onClick={() => window.location.assign("/")}
+          >
+            Continue browsing <ArrowRight size={16} />
+          </button>
+          <button
+            className="text-button"
+            onClick={() => window.location.assign("/account/orders")}
+          >
+            View My Orders
+          </button>
+        </div>
+      </div>
+    </main>
+  );
 }
 
 export default function App() {
@@ -58,11 +166,19 @@ export default function App() {
   const [cartOpen, setCartOpen] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [accountOpenRequest, setAccountOpenRequest] = useState(0);
+  const [accountOpenRequest, setAccountOpenRequest] = useState(() => {
+    const path = window.location.pathname;
+    return ["/admin", "/employee", "/account/orders"].includes(path) ||
+      new URLSearchParams(window.location.search).has("account")
+      ? 1
+      : 0;
+  });
   const [notice, setNotice] = useState("");
   const [showAllFeatured, setShowAllFeatured] = useState(false);
   const [storeHydrated, setStoreHydrated] = useState(false);
   const [checkoutError, setCheckoutError] = useState("");
+  const [paymentMethod, setPaymentMethod] =
+    useState<CheckoutPaymentMethod>("gcash");
 
   const catalogQuery = trpc.catalog.list.useQuery();
   const storeStateQuery = trpc.store.state.useQuery({ sessionId });
@@ -284,12 +400,19 @@ export default function App() {
         address: String(data.get("address") ?? ""),
         city: String(data.get("city") ?? ""),
         postcode: String(data.get("postcode") ?? ""),
+        paymentMethod,
       });
       setCart({});
       setCheckoutError("");
       setCheckoutOpen(false);
       await storeStateQuery.refetch();
-      window.location.assign(result.checkoutUrl);
+      if (result.checkoutUrl) {
+        window.location.assign(result.checkoutUrl);
+      } else {
+        window.location.assign(
+          `/order-success/${result.orderId}?simulated=${result.simulated}`
+        );
+      }
     } catch (error) {
       setCheckoutError(
         error instanceof Error
@@ -307,6 +430,13 @@ export default function App() {
       ?.scrollIntoView({ behavior: "smooth", block: "start" });
     setMobileMenuOpen(false);
   };
+
+  const orderSuccessMatch = /^\/order-success\/(\d+)$/.exec(
+    window.location.pathname
+  );
+  if (orderSuccessMatch) {
+    return <OrderConfirmation orderId={Number(orderSuccessMatch[1])} />;
+  }
 
   return (
     <div className="app-shell">
@@ -1085,15 +1215,50 @@ export default function App() {
                 </div>
                 <div className="form-section">
                   <span className="form-label">2. Secure payment</span>
-                  <div className="payment-placeholder">
-                    <ShieldCheck size={19} />
-                    <div>
-                      <strong>Card, GCash, QR Ph, and enabled methods</strong>
-                      <span>
-                        Payment details are entered only on PayMongo&apos;s
-                        hosted checkout page.
-                      </span>
-                    </div>
+                  <div
+                    className="payment-methods"
+                    role="radiogroup"
+                    aria-label="Payment method"
+                  >
+                    {CHECKOUT_PAYMENT_METHODS.filter(
+                      method => method !== "sandbox" || import.meta.env.DEV
+                    ).map(method => (
+                      <label
+                        key={method}
+                        className={`payment-method${paymentMethod === method ? " is-selected" : ""}`}
+                      >
+                        <input
+                          type="radio"
+                          name="paymentMethod"
+                          value={method}
+                          checked={paymentMethod === method}
+                          onChange={() => setPaymentMethod(method)}
+                        />
+                        <span
+                          className="payment-method__mark"
+                          aria-hidden="true"
+                        >
+                          {method === "card" ? (
+                            <CreditCard size={19} />
+                          ) : method === "sandbox" ? (
+                            <ShieldCheck size={19} />
+                          ) : (
+                            <Smartphone size={19} />
+                          )}
+                        </span>
+                        <span className="payment-method__copy">
+                          <strong>{PAYMENT_METHOD_LABELS[method]}</strong>
+                          <small>
+                            {method === "sandbox"
+                              ? "Simulated payment for local development"
+                              : import.meta.env.DEV
+                                ? "PayMongo checkout; simulated locally if unavailable"
+                                : "Pay securely through PayMongo"}
+                          </small>
+                        </span>
+                        <span className="payment-method__radio" />
+                      </label>
+                    ))}
                   </div>
                 </div>
                 {checkoutError && (

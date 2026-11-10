@@ -1572,28 +1572,70 @@ h2 em {
 .form-grid input:focus {
   border-color: var(--moss);
 }
-.payment-placeholder {
+.payment-methods {
+  display: grid;
+  gap: 8px;
+}
+.payment-method {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 11px;
-  padding: 15px;
+  min-height: 64px;
+  padding: 11px 13px;
   border: 1px solid var(--line);
   background: var(--paper-deep);
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+.payment-method.is-selected {
+  border-color: var(--moss);
+  background: color-mix(in srgb, var(--moss) 8%, var(--paper-deep));
+}
+.payment-method input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+.payment-method input:focus-visible ~ .payment-method__radio {
+  outline: 2px solid var(--moss);
+  outline-offset: 3px;
+}
+.payment-method__mark {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  place-items: center;
   color: var(--moss);
+  background: var(--paper);
+  border-radius: 6px;
 }
-.payment-placeholder div {
+.payment-method__copy {
+  display: grid;
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
-.payment-placeholder strong {
+.payment-method__copy strong {
   color: var(--ink);
   font-size: 11px;
 }
-.payment-placeholder span {
+.payment-method__copy small {
   color: var(--muted);
   font-size: 10px;
+}
+.payment-method__radio {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 17px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+}
+.payment-method.is-selected .payment-method__radio {
+  border: 5px solid var(--moss);
 }
 .checkout-order {
   padding: 48px 36px;
@@ -2261,6 +2303,120 @@ h2 em {
 }
 .account-order > small {
   line-height: 1.4;
+}
+.transaction-table-wrap {
+  max-width: 100%;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+.transaction-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+}
+.transaction-table th,
+.transaction-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  white-space: nowrap;
+}
+.transaction-table th {
+  color: var(--muted);
+  background: var(--paper-deep);
+  font-size: 9px;
+  text-transform: uppercase;
+}
+.transaction-table td {
+  color: var(--ink);
+}
+.transaction-table td small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+}
+.transaction-table tr:last-child td {
+  border-bottom: 0;
+}
+.order-confirmation {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding-block: 48px;
+}
+.order-confirmation__card {
+  width: min(100%, 620px);
+  padding: clamp(24px, 6vw, 48px);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.12);
+}
+.order-confirmation__icon {
+  display: grid;
+  width: 54px;
+  height: 54px;
+  place-items: center;
+  margin-bottom: 24px;
+  color: var(--moss);
+  background: var(--paper-deep);
+  border-radius: 50%;
+}
+.order-confirmation__card h1 {
+  margin: 10px 0;
+  font-family: var(--serif);
+  font-size: clamp(32px, 7vw, 48px);
+  font-weight: 500;
+}
+.order-confirmation__message {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.order-confirmation__details {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 24px;
+  padding: 18px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.order-confirmation__details div {
+  display: grid;
+  gap: 5px;
+}
+.order-confirmation__details span {
+  color: var(--muted);
+  font-size: 10px;
+}
+.order-confirmation__details strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+.order-confirmation__items {
+  display: grid;
+  gap: 8px;
+  margin: 18px 0;
+  padding: 0;
+  list-style: none;
+}
+.order-confirmation__items li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.order-confirmation__items strong {
+  color: var(--ink);
+}
+.order-confirmation__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  margin-top: 24px;
 }
 .employee-form {
   margin-top: 22px;
