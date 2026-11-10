@@ -1,6 +1,6 @@
 import "dotenv/config";
-import { seedCatalogIfEmpty } from "./db";
+import { ensureCatalogIsCurrent } from "./db";
 
-const seeded = await seedCatalogIfEmpty();
-console.log(seeded ? "Leaf & Lore catalog seeded." : "Leaf & Lore catalog already contains data.");
+await ensureCatalogIsCurrent();
+console.log("Codex-geeked catalog is up to date.");
 process.exit(0);

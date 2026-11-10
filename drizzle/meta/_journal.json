@@ -15,6 +15,13 @@
       "when": 1790994942729,
       "tag": "0001_optimal_sentinel",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1794311670679,
+      "tag": "0002_employee-role",
+      "breakpoints": true
     }
   ]
 }

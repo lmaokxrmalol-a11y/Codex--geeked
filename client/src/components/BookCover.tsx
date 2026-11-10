@@ -13,10 +13,14 @@ export default function BookCover({ book, size = "card" }: BookCoverProps) {
   } as CSSProperties;
 
   return (
-    <div className={`book-cover book-cover--${size}`} style={style} aria-label={`${book.title} by ${book.author}`}>
+    <div
+      className={`book-cover book-cover--${size}`}
+      style={style}
+      aria-label={`${book.title} by ${book.author}`}
+    >
       <div className="book-cover__grain" />
       <div className="book-cover__topline">
-        <span>leaf &amp; lore</span>
+        <span>codex-geeked</span>
         <span>{book.category}</span>
       </div>
       <div className="book-cover__title">{book.title}</div>
