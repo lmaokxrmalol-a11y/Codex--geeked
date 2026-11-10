@@ -133,6 +133,13 @@ function findUser(id: number) {
   return row ? toLocalUser(row as Record<string, unknown>) : null;
 }
 
+function findUserByEmail(email: string) {
+  const row = database
+    .prepare("SELECT * FROM local_users WHERE email = ? COLLATE NOCASE")
+    .get(email.trim());
+  return row ? toLocalUser(row as Record<string, unknown>) : null;
+}
+
 export async function createLocalUser(input: {
   email: string;
   name: string;
@@ -163,6 +170,72 @@ export async function createLocalUser(input: {
     }
     throw error;
   }
+}
+
+export async function seedLocalTestAccounts() {
+  if (process.env.NODE_ENV === "production") {
+    console.info("[Auth] Skipping development test accounts in production");
+    return 0;
+  }
+
+  const adminPassword = process.env.LOCAL_TEST_ADMIN_PASSWORD;
+  const employeePassword = process.env.LOCAL_TEST_EMPLOYEE_PASSWORD;
+  const customerPassword = process.env.LOCAL_TEST_CUSTOMER_PASSWORD;
+  if (!adminPassword || !employeePassword || !customerPassword) {
+    const missingCredentials = [
+      !adminPassword && "admin",
+      !employeePassword && "employee",
+      !customerPassword && "customer",
+    ].filter((role): role is string => Boolean(role));
+    console.info(
+      `[Auth] Skipping development test accounts; set password variables for: ${missingCredentials.join(", ")}`
+    );
+    return 0;
+  }
+
+  const accounts = [
+    {
+      name: "Leaflore Admin",
+      email: "admin@leaflore.com",
+      password: adminPassword,
+      role: "admin",
+    },
+    {
+      name: "Leaflore Employee",
+      email: "employee@leaflore.com",
+      password: employeePassword,
+      role: "employee",
+    },
+    {
+      name: "Leaflore Customer",
+      email: "customer@gmail.com",
+      password: customerPassword,
+      role: "user",
+    },
+  ] as const;
+  let createdCount = 0;
+
+  for (const account of accounts) {
+    if (findUserByEmail(account.email)) continue;
+    try {
+      await createLocalUser(account);
+      createdCount += 1;
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message === "An account with that email already exists" &&
+        findUserByEmail(account.email)
+      ) {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  if (createdCount > 0) {
+    console.info(`[Auth] Seeded ${createdCount} development test account(s)`);
+  }
+  return createdCount;
 }
 
 export async function bootstrapInitialAdmin() {

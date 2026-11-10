@@ -1,4 +1,12 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
+import {
+  int,
+  mysqlEnum,
+  mysqlTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  varchar,
+} from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -6,7 +14,9 @@ export const users = mysqlTable("users", {
   name: text("name"),
   email: varchar("email", { length: 320 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
-  role: mysqlEnum("role", ["user", "employee", "admin"]).default("user").notNull(),
+  role: mysqlEnum("role", ["user", "employee", "admin"])
+    .default("user")
+    .notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
@@ -16,7 +26,12 @@ export const books = mysqlTable("books", {
   id: varchar("id", { length: 64 }).primaryKey(),
   title: varchar("title", { length: 255 }).notNull(),
   author: varchar("author", { length: 255 }).notNull(),
-  category: mysqlEnum("category", ["Fiction", "Nonfiction", "Poetry", "Food & drink"]).notNull(),
+  category: mysqlEnum("category", [
+    "Fiction",
+    "Nonfiction",
+    "Poetry",
+    "Food & drink",
+  ]).notNull(),
   priceCents: int("priceCents").notNull(),
   ratingTenths: int("ratingTenths").notNull(),
   reviews: int("reviews").notNull().default(0),
@@ -35,25 +50,43 @@ export const books = mysqlTable("books", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
-export const wishlistItems = mysqlTable("wishlistItems", {
-  id: int("id").autoincrement().primaryKey(),
-  sessionId: varchar("sessionId", { length: 128 }).notNull(),
-  bookId: varchar("bookId", { length: 64 }).notNull().references(() => books.id, { onDelete: "cascade" }),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-}, (table) => ({
-  sessionBookUnique: uniqueIndex("wishlist_session_book_unique").on(table.sessionId, table.bookId),
-}));
+export const wishlistItems = mysqlTable(
+  "wishlistItems",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    sessionId: varchar("sessionId", { length: 128 }).notNull(),
+    bookId: varchar("bookId", { length: 64 })
+      .notNull()
+      .references(() => books.id, { onDelete: "cascade" }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  table => ({
+    sessionBookUnique: uniqueIndex("wishlist_session_book_unique").on(
+      table.sessionId,
+      table.bookId
+    ),
+  })
+);
 
-export const cartItems = mysqlTable("cartItems", {
-  id: int("id").autoincrement().primaryKey(),
-  sessionId: varchar("sessionId", { length: 128 }).notNull(),
-  bookId: varchar("bookId", { length: 64 }).notNull().references(() => books.id, { onDelete: "cascade" }),
-  quantity: int("quantity").notNull().default(1),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-}, (table) => ({
-  sessionBookUnique: uniqueIndex("cart_session_book_unique").on(table.sessionId, table.bookId),
-}));
+export const cartItems = mysqlTable(
+  "cartItems",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    sessionId: varchar("sessionId", { length: 128 }).notNull(),
+    bookId: varchar("bookId", { length: 64 })
+      .notNull()
+      .references(() => books.id, { onDelete: "cascade" }),
+    quantity: int("quantity").notNull().default(1),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => ({
+    sessionBookUnique: uniqueIndex("cart_session_book_unique").on(
+      table.sessionId,
+      table.bookId
+    ),
+  })
+);
 
 export const orders = mysqlTable("orders", {
   id: int("id").autoincrement().primaryKey(),
@@ -64,7 +97,9 @@ export const orders = mysqlTable("orders", {
   address: varchar("address", { length: 255 }).notNull(),
   city: varchar("city", { length: 120 }).notNull(),
   postcode: varchar("postcode", { length: 32 }).notNull(),
-  status: mysqlEnum("status", ["pending", "paid", "fulfilled", "cancelled"]).default("pending").notNull(),
+  status: mysqlEnum("status", ["pending", "paid", "fulfilled", "cancelled"])
+    .default("pending")
+    .notNull(),
   subtotalCents: int("subtotalCents").notNull(),
   shippingCents: int("shippingCents").notNull(),
   totalCents: int("totalCents").notNull(),
@@ -73,7 +108,9 @@ export const orders = mysqlTable("orders", {
 
 export const orderItems = mysqlTable("orderItems", {
   id: int("id").autoincrement().primaryKey(),
-  orderId: int("orderId").notNull().references(() => orders.id, { onDelete: "cascade" }),
+  orderId: int("orderId")
+    .notNull()
+    .references(() => orders.id, { onDelete: "cascade" }),
   bookId: varchar("bookId", { length: 64 }).notNull(),
   title: varchar("title", { length: 255 }).notNull(),
   priceCents: int("priceCents").notNull(),

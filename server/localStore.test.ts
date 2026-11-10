@@ -10,6 +10,7 @@ import {
   loginLocalUser,
   replyToConversation,
   saveLocalOrder,
+  seedLocalTestAccounts,
 } from "./localStore";
 
 const uniqueEmail = (label: string) =>
@@ -37,6 +38,53 @@ describe("local accounts and support", () => {
       id: customer.id,
       role: "user",
     });
+  });
+
+  it("seeds hashed development accounts only when missing", async () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    const originalPasswords = {
+      admin: process.env.LOCAL_TEST_ADMIN_PASSWORD,
+      employee: process.env.LOCAL_TEST_EMPLOYEE_PASSWORD,
+      customer: process.env.LOCAL_TEST_CUSTOMER_PASSWORD,
+    };
+    process.env.NODE_ENV = "production";
+    try {
+      await expect(seedLocalTestAccounts()).resolves.toBe(0);
+    } finally {
+      if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = originalNodeEnv;
+    }
+
+    process.env.LOCAL_TEST_ADMIN_PASSWORD = "seed-admin-test-password";
+    process.env.LOCAL_TEST_EMPLOYEE_PASSWORD = "seed-employee-test-password";
+    process.env.LOCAL_TEST_CUSTOMER_PASSWORD = "seed-customer-test-password";
+    await seedLocalTestAccounts();
+
+    const accounts = [
+      ["admin@leaflore.com", "seed-admin-test-password", "admin"],
+      ["employee@leaflore.com", "seed-employee-test-password", "employee"],
+      ["customer@gmail.com", "seed-customer-test-password", "user"],
+    ] as const;
+    try {
+      for (const [email, password, role] of accounts) {
+        await expect(loginLocalUser(email, password)).resolves.toMatchObject({
+          email,
+          role,
+        });
+      }
+
+      await expect(seedLocalTestAccounts()).resolves.toBe(0);
+    } finally {
+      if (originalPasswords.admin === undefined)
+        delete process.env.LOCAL_TEST_ADMIN_PASSWORD;
+      else process.env.LOCAL_TEST_ADMIN_PASSWORD = originalPasswords.admin;
+      if (originalPasswords.employee === undefined)
+        delete process.env.LOCAL_TEST_EMPLOYEE_PASSWORD;
+      else process.env.LOCAL_TEST_EMPLOYEE_PASSWORD = originalPasswords.employee;
+      if (originalPasswords.customer === undefined)
+        delete process.env.LOCAL_TEST_CUSTOMER_PASSWORD;
+      else process.env.LOCAL_TEST_CUSTOMER_PASSWORD = originalPasswords.customer;
+    }
   });
 
   it("separates system and book-support queues and gives customers an FAQ reply", async () => {

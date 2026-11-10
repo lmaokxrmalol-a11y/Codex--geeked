@@ -10,7 +10,7 @@ import {
   type InsertUser,
   users,
   wishlistItems,
-} from "../drizzle/schema";
+} from "../shared/schema";
 import { ENV } from "./_core/env";
 import { saveLocalOrder, type LocalOrderItem } from "./localStore";
 
@@ -376,7 +376,14 @@ export async function createOrder(input: {
         totalCents,
         estimatedDelivery: estimateDeliveryDate(),
       });
-      return { orderId, subtotalCents, shippingCents, totalCents, items, localOnly: true };
+      return {
+        orderId,
+        subtotalCents,
+        shippingCents,
+        totalCents,
+        items,
+        localOnly: true,
+      };
     }
     localCarts.delete(input.sessionId);
     return {
@@ -420,7 +427,14 @@ export async function createOrder(input: {
       totalCents,
       estimatedDelivery: estimateDeliveryDate(),
     });
-    return { orderId, subtotalCents, shippingCents, totalCents, items, localOnly: false };
+    return {
+      orderId,
+      subtotalCents,
+      shippingCents,
+      totalCents,
+      items,
+      localOnly: false,
+    };
   }
   const result = await db.insert(orders).values({
     ...input,

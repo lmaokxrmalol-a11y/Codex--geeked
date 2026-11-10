@@ -6,7 +6,9 @@ codex-geeked is a React / Express / tRPC / Drizzle online bookstore for curious 
 
 Use `pnpm dev` for the full development server on port 3000. Use `pnpm check` for TypeScript, `pnpm test` for the application tests, and `pnpm build` followed by `pnpm start` for the production server build. Node.js 24 or newer is required for the built-in SQLite account/order store. Without MySQL, the storefront catalog uses its bundled starter books and the guest cart is in server memory; accounts, conversations, and transactions are persisted to `.data/leaflore.sqlite`.
 
-To provision the first admin, set `INITIAL_ADMIN_EMAIL` and `INITIAL_ADMIN_PASSWORD` (at least 12 characters) in the ignored `.env` file and start the server. Optionally set `INITIAL_ADMIN_NAME`. Admins create employee accounts from the Account panel; customers can register themselves. There is no public admin or employee registration.
+Development startup seeds these local SQLite test accounts when their emails do not already exist and their passwords are configured in the ignored `.env` file: `admin@leaflore.com`, `employee@leaflore.com`, and `customer@gmail.com`. Set `LOCAL_TEST_ADMIN_PASSWORD`, `LOCAL_TEST_EMPLOYEE_PASSWORD`, and `LOCAL_TEST_CUSTOMER_PASSWORD` in `.env`; `.env.example` lists the variable names. The customer account uses the internal `user` role. Automatic test-account seeding is skipped when `NODE_ENV=production`, and existing accounts are never overwritten. Use test-only passwords, not production credentials.
+
+To provision a custom first admin, set `INITIAL_ADMIN_EMAIL` and `INITIAL_ADMIN_PASSWORD` (at least 12 characters) in the ignored `.env` file and start the server. Optionally set `INITIAL_ADMIN_NAME`. Admins create employee accounts from the Account panel; customers can register themselves. There is no public admin or employee registration. Run `pnpm db:seed` to seed missing local test accounts and synchronize the starter catalog.
 
 To enable test payments, configure `PAYMONGO_SECRET_KEY` with a PayMongo test key, `PAYMONGO_WEBHOOK_SECRET` with the webhook signing secret, and `PUBLIC_APP_URL` with the app's base URL. Optional `PAYMONGO_PAYMENT_METHOD_TYPES` is a comma-separated list (default `card,gcash,qrph`); PayMongo only displays methods enabled for the merchant account. Configure a PayMongo webhook at `/webhooks/paymongo` for `checkout_session.payment.paid`. A local webhook needs a reachable HTTPS tunnel; the return redirect alone never marks an order paid. Live payments require explicitly setting `PAYMONGO_MODE=live` and using a live secret and webhook secret. Never put payment credentials in browser code or collect raw card details in this app.
 
@@ -14,17 +16,18 @@ Prices use PHP; orders over ₱1,500 receive free shipping, while other orders a
 
 ## Architecture
 
-| Area                 | Responsibility                                                                             |
-| -------------------- | ------------------------------------------------------------------------------------------ |
-| `client/src/App.tsx` | Storefront UI, search/category/price filters, sorting, cart/wishlist, and checkout |
+| Area                                       | Responsibility                                                                       |
+| ------------------------------------------ | ------------------------------------------------------------------------------------ |
+| `client/src/App.tsx`                       | Storefront UI, search/category/price filters, sorting, cart/wishlist, and checkout   |
 | `client/src/components/AccountSupport.tsx` | Local login/registration, order history, staff account creation, and support inboxes |
-| `shared/books.ts`    | Canonical seed catalog and shared book types                                               |
-| `drizzle/schema.ts`  | MySQL catalog, guest cart/wishlist, and role definitions                                   |
-| `server/localStore.ts` | SQLite accounts/sessions, support conversations, and transaction history                |
-| `server/payments.ts` | PayMongo hosted checkout and webhook signature verification                                |
-| `server/db.ts`       | Drizzle catalog/cart queries and server-side order totals                                  |
-| `server/routers.ts`  | Typed tRPC API surface                                                                     |
-| `server/seed.ts`     | Repeatable starter-catalog synchronization command                                         |
+| `shared/books.ts`                          | Canonical seed catalog and shared book types                                         |
+| `shared/schema.ts`                         | Shared MySQL catalog, guest cart/wishlist, and role definitions                      |
+| `server/drizzle/`                          | Backend-owned MySQL migrations and snapshots                                         |
+| `server/localStore.ts`                     | SQLite accounts/sessions, support conversations, and transaction history             |
+| `server/payments.ts`                       | PayMongo hosted checkout and webhook signature verification                          |
+| `server/db.ts`                             | Drizzle catalog/cart queries and server-side order totals                            |
+| `server/routers.ts`                        | Typed tRPC API surface                                                               |
+| `server/seed.ts`                           | Development account and starter-catalog seeding command                              |
 
 ## API surface
 

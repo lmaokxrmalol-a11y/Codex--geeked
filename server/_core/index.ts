@@ -2,7 +2,11 @@ import "dotenv/config";
 import express from "express";
 import { createServer } from "http";
 import type { Request } from "express";
-import { bootstrapInitialAdmin, markOrderPaid } from "../localStore";
+import {
+  bootstrapInitialAdmin,
+  markOrderPaid,
+  seedLocalTestAccounts,
+} from "../localStore";
 import { parsePaidCheckoutEvent, verifyPayMongoWebhook } from "../payments";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
@@ -13,6 +17,7 @@ import { serveStatic, setupVite } from "./vite";
 
 async function startServer() {
   await bootstrapInitialAdmin();
+  await seedLocalTestAccounts();
   const app = express();
   const server = createServer(app);
   // Configure body parser with larger size limit for file uploads

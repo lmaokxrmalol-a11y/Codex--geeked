@@ -101,32 +101,30 @@ describe("role-based account procedures", () => {
     ).resolves.toMatchObject({ role: "employee" });
   });
 
-  it("requires the selected sign-in type to match the account role", async () => {
-    const employee = await createLocalUser({
-      name: "Role-specific Employee",
-      email: `role-login-${crypto.randomUUID()}@example.test`,
-      password: "employee-login-password-2026",
-      role: "employee",
-    });
-    const caller = appRouter.createCaller(createAnonymousContext());
+  it.each([
+    ["user", "/"],
+    ["employee", "/employee"],
+    ["admin", "/admin"],
+  ] as const)(
+    "redirects a %s to its role-specific destination",
+    async (role, redirectTo) => {
+      const user = await createLocalUser({
+        name: `Role Test ${role}`,
+        email: `role-login-${crypto.randomUUID()}@example.test`,
+        password: "role-login-password-2026",
+        role,
+      });
+      const caller = appRouter.createCaller(createAnonymousContext());
 
-    await expect(
-      caller.auth.login({
-        email: employee.email,
-        password: "employee-login-password-2026",
-        role: "user",
-      })
-    ).rejects.toMatchObject({
-      code: "FORBIDDEN",
-      message: expect.stringContaining("employee"),
-    });
-
-    await expect(
-      caller.auth.login({
-        email: employee.email,
-        password: "employee-login-password-2026",
-        role: "employee",
-      })
-    ).resolves.toMatchObject({ role: "employee" });
-  });
+      await expect(
+        caller.auth.login({
+          email: user.email,
+          password: "role-login-password-2026",
+        })
+      ).resolves.toMatchObject({
+        user: { role },
+        redirectTo,
+      });
+    }
+  );
 });

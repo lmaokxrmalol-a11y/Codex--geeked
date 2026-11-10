@@ -96,7 +96,6 @@ export const appRouter = router({
         z.object({
           email: emailSchema,
           password: z.string().min(1).max(128),
-          role: z.enum(["user", "employee", "admin"]),
         })
       )
       .mutation(async ({ ctx, input }) => {
@@ -106,13 +105,14 @@ export const appRouter = router({
             code: "UNAUTHORIZED",
             message: "Email or password is incorrect",
           });
-        if (user.role !== input.role)
-          throw new TRPCError({
-            code: "FORBIDDEN",
-            message: `This account is registered as ${user.role === "user" ? "a customer" : `an ${user.role}`}. Select the matching sign-in type.`,
-          });
         setLocalSession(ctx, user.id);
-        return user;
+        const redirectTo =
+          user.role === "admin"
+            ? "/admin"
+            : user.role === "employee"
+              ? "/employee"
+              : "/";
+        return { user, redirectTo };
       }),
     logout: publicProcedure.mutation(({ ctx }) => {
       const token = parseCookieHeader(ctx.req.headers.cookie ?? "")[

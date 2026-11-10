@@ -5,7 +5,6 @@ import { trpc } from "../lib/trpc";
 import { formatPrice } from "../lib/currency";
 
 type Channel = "system" | "books";
-type LoginRole = "user" | "employee" | "admin";
 
 export default function AccountSupport({
   openRequest = 0,
@@ -14,7 +13,6 @@ export default function AccountSupport({
 }) {
   const [open, setOpen] = useState(false);
   const [registering, setRegistering] = useState(false);
-  const [loginRole, setLoginRole] = useState<LoginRole>("user");
   const [selectedConversation, setSelectedConversation] = useState<
     number | null
   >(null);
@@ -73,11 +71,12 @@ export default function AccountSupport({
           password: String(form.get("password") ?? ""),
         });
       } else {
-        await login.mutateAsync({
+        const result = await login.mutateAsync({
           email: String(form.get("email") ?? ""),
           password: String(form.get("password") ?? ""),
-          role: loginRole,
         });
+        window.location.assign(result.redirectTo);
+        return;
       }
       await refreshAccount();
     } catch (reason) {
@@ -157,7 +156,6 @@ export default function AccountSupport({
     await refreshAccount();
     setSelectedConversation(null);
     setRegistering(false);
-    setLoginRole("user");
   };
 
   return (
@@ -209,35 +207,6 @@ export default function AccountSupport({
 
               {!me.data ? (
                 <form className="account-auth-form" onSubmit={submitAuth}>
-                  {!registering && (
-                    <fieldset className="login-role-picker">
-                      <legend>Sign in as</legend>
-                      <div className="login-role-picker__options">
-                        {(
-                          [
-                            ["user", "Customer"],
-                            ["employee", "Employee"],
-                            ["admin", "Admin"],
-                          ] as const
-                        ).map(([roleOption, label]) => (
-                          <button
-                            key={roleOption}
-                            type="button"
-                            className={
-                              loginRole === roleOption ? "is-selected" : ""
-                            }
-                            aria-pressed={loginRole === roleOption}
-                            onClick={() => {
-                              setLoginRole(roleOption);
-                              setError("");
-                            }}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                    </fieldset>
-                  )}
                   {registering && (
                     <label>
                       Full name
@@ -273,11 +242,7 @@ export default function AccountSupport({
                   <p className="account-help">
                     {registering
                       ? "Customer registration is open. Staff accounts are created privately by the store."
-                      : loginRole === "admin"
-                        ? "Use the administrator email and password configured for this store."
-                        : loginRole === "employee"
-                          ? "Use the employee email and password provided by your administrator."
-                          : "Sign in with the email and password you used to register."}
+                      : "Sign in with your email and password."}
                   </p>
                   {error && <p className="checkout-error">{error}</p>}
                   <button
@@ -296,7 +261,6 @@ export default function AccountSupport({
                     className="text-button account-switch"
                     onClick={() => {
                       setError("");
-                      if (!registering) setLoginRole("user");
                       setRegistering(value => !value);
                     }}
                   >

@@ -2174,38 +2174,6 @@ h2 em {
   width: min(420px, 100%);
   margin: 0 auto;
 }
-.login-role-picker {
-  min-width: 0;
-  margin: 0 0 4px;
-  padding: 0;
-  border: 0;
-}
-.login-role-picker legend {
-  margin-bottom: 8px;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 700;
-}
-.login-role-picker__options {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 7px;
-}
-.login-role-picker__options button {
-  min-height: 42px;
-  padding: 8px;
-  color: var(--muted);
-  background: var(--paper-deep);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  font-size: 12px;
-  cursor: pointer;
-}
-.login-role-picker__options button.is-selected {
-  color: var(--ink);
-  border-color: var(--moss);
-  box-shadow: inset 0 0 0 1px var(--moss);
-}
 .account-auth-form label,
 .employee-form label,
 .support-compose label {
