@@ -21,13 +21,16 @@ import {
   createLocalSession,
   createLocalUser,
   createConversation,
+  createEmployeeReport,
   deleteLocalSession,
+  getBuyerAnalytics,
   getLocalSessionUser,
   getOrderForUser,
   loginLocalUser,
   listConversations,
   listOrders,
   listTransactions,
+  listEmployeeReports,
   replyToConversation,
   setConversationStatus,
   setOrderStatus,
@@ -63,6 +66,15 @@ function assertLocalUser(user: AuthenticatedUser | null): LocalUser {
     });
   }
   return user as LocalUser;
+}
+
+function assertCanShop(user: AuthenticatedUser | null) {
+  if (user && user.role !== "user") {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Only customer accounts can use shopping features",
+    });
+  }
 }
 
 function setLocalSession(
@@ -224,6 +236,56 @@ export const appRouter = router({
         return { success: true };
       }),
   }),
+  reports: router({
+    mine: employeeProcedure.query(({ ctx }) => {
+      const employee = assertLocalUser(ctx.user);
+      if (employee.role !== "employee") {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Employee access required",
+        });
+      }
+      return listEmployeeReports(employee);
+    }),
+    submit: employeeProcedure
+      .input(
+        z.object({
+          reportText: z.string().trim().min(1).max(10000),
+        })
+      )
+      .mutation(({ ctx, input }) => {
+        const employee = assertLocalUser(ctx.user);
+        if (employee.role !== "employee") {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Only employees can submit daily progress reports",
+          });
+        }
+        return createEmployeeReport(employee, input.reportText);
+      }),
+    all: adminProcedure.query(({ ctx }) => {
+      const admin = assertLocalUser(ctx.user);
+      if (admin.role !== "admin") {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Administrator access required",
+        });
+      }
+      return listEmployeeReports();
+    }),
+  }),
+  admin: router({
+    buyerAnalytics: adminProcedure.query(({ ctx }) => {
+      const admin = assertLocalUser(ctx.user);
+      if (admin.role !== "admin") {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Administrator access required",
+        });
+      }
+      return getBuyerAnalytics();
+    }),
+  }),
   catalog: router({
     list: publicProcedure.query(() => listCatalog()),
     inventory: employeeProcedure.query(() => listCatalog()),
@@ -254,7 +316,8 @@ export const appRouter = router({
           quantity: z.number().int().min(1).max(20).default(1),
         })
       )
-      .mutation(async ({ input }) => {
+      .mutation(async ({ ctx, input }) => {
+        assertCanShop(ctx.user);
         try {
           return await addToCart(input.sessionId, input.bookId, input.quantity);
         } catch (error) {
@@ -275,7 +338,8 @@ export const appRouter = router({
           quantity: z.number().int().min(0).max(20),
         })
       )
-      .mutation(async ({ input }) => {
+      .mutation(async ({ ctx, input }) => {
+        assertCanShop(ctx.user);
         try {
           return await setCartQuantity(
             input.sessionId,
@@ -294,7 +358,10 @@ export const appRouter = router({
       }),
     removeFromCart: publicProcedure
       .input(z.object({ sessionId, bookId }))
-      .mutation(({ input }) => removeFromCart(input.sessionId, input.bookId)),
+      .mutation(({ ctx, input }) => {
+        assertCanShop(ctx.user);
+        return removeFromCart(input.sessionId, input.bookId);
+      }),
   }),
   checkout: router({
     createOrder: protectedProcedure
@@ -314,13 +381,13 @@ export const appRouter = router({
         })
       )
       .mutation(async ({ ctx, input }) => {
-        const user = assertLocalUser(ctx.user);
-        if (user.role !== "user") {
+        if (ctx.user.role !== "user") {
           throw new TRPCError({
             code: "FORBIDDEN",
             message: "Only customer accounts can place orders",
           });
         }
+        const user = assertLocalUser(ctx.user);
         let orderId: number | undefined;
         let checkoutSessionCreated = false;
         try {

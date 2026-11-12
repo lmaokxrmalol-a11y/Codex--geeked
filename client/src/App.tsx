@@ -180,6 +180,7 @@ export default function App() {
   const [paymentMethod, setPaymentMethod] =
     useState<CheckoutPaymentMethod>("gcash");
 
+  const currentUser = trpc.auth.me.useQuery();
   const catalogQuery = trpc.catalog.list.useQuery(undefined, {
     refetchInterval: 10000,
   });
@@ -190,12 +191,21 @@ export default function App() {
   const removeFromCartMutation = trpc.store.removeFromCart.useMutation();
   const createOrderMutation = trpc.checkout.createOrder.useMutation();
   const utils = trpc.useUtils();
+  const canPurchase =
+    currentUser.data?.role !== "employee" &&
+    currentUser.data?.role !== "admin";
 
   useEffect(() => {
     if (!notice) return;
     const timer = window.setTimeout(() => setNotice(""), 2600);
     return () => window.clearTimeout(timer);
   }, [notice]);
+
+  useEffect(() => {
+    if (canPurchase) return;
+    setCartOpen(false);
+    setCheckoutOpen(false);
+  }, [canPurchase]);
 
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -335,6 +345,7 @@ export default function App() {
   };
 
   const addToCart = (book: Book) => {
+    if (!canPurchase) return;
     const quantityInCart = cart[book.id] ?? 0;
     const available =
       catalogBooks.find(item => item.id === book.id)?.stock ?? book.stock ?? 10;
@@ -365,6 +376,7 @@ export default function App() {
   };
 
   const updateQuantity = (bookId: string, change: number) => {
+    if (!canPurchase) return;
     const nextQuantity = (cart[bookId] ?? 0) + change;
     const book = catalogBooks.find(item => item.id === bookId);
     if (change > 0 && book && nextQuantity > (book.stock ?? 10)) {
@@ -394,6 +406,7 @@ export default function App() {
   };
 
   const removeFromCart = (book: Book) => {
+    if (!canPurchase) return;
     setCart(current => {
       const { [book.id]: _, ...rest } = current;
       return rest;
@@ -409,6 +422,7 @@ export default function App() {
   };
 
   const startCheckout = () => {
+    if (!canPurchase) return;
     if (!cartCount) {
       announce("Your cart is empty — find a book to begin");
       return;
@@ -419,6 +433,7 @@ export default function App() {
   };
 
   const completeCheckout = async () => {
+    if (!canPurchase) return;
     const form = document.getElementById(
       "checkout-form"
     ) as HTMLFormElement | null;
@@ -551,26 +566,30 @@ export default function App() {
             >
               Account &amp; support
             </button>
-            <button
-              onClick={() => {
-                setMobileMenuOpen(false);
-                setCartOpen(true);
-              }}
-            >
-              Your cart {cartCount > 0 ? `(${cartCount})` : ""}
-            </button>
+            {canPurchase && (
+              <button
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  setCartOpen(true);
+                }}
+              >
+                Your cart {cartCount > 0 ? `(${cartCount})` : ""}
+              </button>
+            )}
           </nav>
           <div className="header-actions">
             <AccountSupport openRequest={accountOpenRequest} />
-            <button
-              className="header-action header-action--bag"
-              onClick={() => setCartOpen(true)}
-              aria-label={`Open cart, ${cartCount} items`}
-            >
-              <ShoppingBag size={18} />
-              <span>Cart</span>
-              {cartCount > 0 && <b>{cartCount}</b>}
-            </button>
+            {canPurchase && (
+              <button
+                className="header-action header-action--bag"
+                onClick={() => setCartOpen(true)}
+                aria-label={`Open cart, ${cartCount} items`}
+              >
+                <ShoppingBag size={18} />
+                <span>Cart</span>
+                {cartCount > 0 && <b>{cartCount}</b>}
+              </button>
+            )}
           </div>
         </div>
         <div className="header-search">
@@ -708,6 +727,7 @@ export default function App() {
                   onAdd={addToCart}
                   onOpen={setSelectedBook}
                   quantityInCart={cart[book.id] ?? 0}
+                  canPurchase={canPurchase}
                 />
               )
             )}
@@ -805,6 +825,7 @@ export default function App() {
                   onAdd={addToCart}
                   onOpen={setSelectedBook}
                   quantityInCart={cart[book.id] ?? 0}
+                  canPurchase={canPurchase}
                 />
               ))}
             </div>
@@ -1008,22 +1029,24 @@ export default function App() {
                   <span key={tag}>#{tag}</span>
                 ))}
               </div>
-              <div className="detail-purchase">
-                <strong>{formatPrice(selectedBook.price)}</strong>
-                <button
-                  className="button button--primary"
-                  disabled={
-                    selectedBookStock === 0 ||
-                    (cart[selectedBook.id] ?? 0) >= selectedBookStock
-                  }
-                  onClick={() => {
-                    addToCart(selectedBook);
-                    setSelectedBook(null);
-                  }}
-                >
-                  Add to cart <Plus size={16} />
-                </button>
-              </div>
+              {canPurchase && (
+                <div className="detail-purchase">
+                  <strong>{formatPrice(selectedBook.price)}</strong>
+                  <button
+                    className="button button--primary"
+                    disabled={
+                      selectedBookStock === 0 ||
+                      (cart[selectedBook.id] ?? 0) >= selectedBookStock
+                    }
+                    onClick={() => {
+                      addToCart(selectedBook);
+                      setSelectedBook(null);
+                    }}
+                  >
+                    Add to cart <Plus size={16} />
+                  </button>
+                </div>
+              )}
               <button
                 className={`wishlist-link ${wishlist.has(selectedBook.id) ? "is-wished" : ""}`}
                 onClick={() => toggleWishlist(selectedBook)}
@@ -1041,7 +1064,7 @@ export default function App() {
         </div>
       )}
 
-      {cartOpen && (
+      {canPurchase && cartOpen && (
         <div className="drawer-backdrop" onClick={() => setCartOpen(false)}>
           <aside
             className="cart-drawer"
@@ -1172,7 +1195,7 @@ export default function App() {
         </div>
       )}
 
-      {checkoutOpen && (
+      {canPurchase && checkoutOpen && (
         <div className="modal-backdrop" onClick={() => setCheckoutOpen(false)}>
           <div
             className="checkout-modal"

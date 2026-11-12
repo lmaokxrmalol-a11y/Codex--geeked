@@ -10,6 +10,7 @@ type BookCardProps = {
   onAdd: (book: Book) => void;
   onOpen: (book: Book) => void;
   quantityInCart?: number;
+  canPurchase?: boolean;
 };
 
 export default function BookCard({
@@ -19,6 +20,7 @@ export default function BookCard({
   onAdd,
   onOpen,
   quantityInCart = 0,
+  canPurchase = true,
 }: BookCardProps) {
   const stock = book.stock ?? 10;
   const stockLabel =
@@ -83,14 +85,16 @@ export default function BookCard({
           <strong className="book-card__price">
             {formatPrice(book.price)}
           </strong>
-          <button
-            className="add-button"
-            onClick={() => onAdd(book)}
-            disabled={stock === 0 || quantityInCart >= stock}
-          >
-            <ShoppingCart size={15} />{" "}
-            {stock === 0 ? "Out of stock" : "Add to cart"}
-          </button>
+          {canPurchase && (
+            <button
+              className="add-button"
+              onClick={() => onAdd(book)}
+              disabled={stock === 0 || quantityInCart >= stock}
+            >
+              <ShoppingCart size={15} />{" "}
+              {stock === 0 ? "Out of stock" : "Add to cart"}
+            </button>
+          )}
         </div>
       </div>
     </article>

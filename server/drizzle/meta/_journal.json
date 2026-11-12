@@ -29,6 +29,13 @@
       "when": 1794459648241,
       "tag": "0003_thankful_zodiak",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1794464902748,
+      "tag": "0004_nasty_sabra",
+      "breakpoints": true
     }
   ]
 }

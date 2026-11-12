@@ -3,7 +3,9 @@ import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
 import {
   createLocalUser,
+  getBuyerAnalytics,
   getLocalSessionUser,
+  listEmployeeReports,
   listOrders,
   listTransactions,
 } from "./localStore";
@@ -58,10 +60,11 @@ describe("role-based account procedures", () => {
     const startingStock = (await getCatalogBook(bookId))?.stock;
     if (typeof startingStock !== "number")
       throw new Error("Book stock is missing");
-    const caller = appRouter.createCaller(createContext(employee));
+    const employeeCaller = appRouter.createCaller(createContext(employee));
+    const customerCaller = appRouter.createCaller(createContext(customer));
 
     await expect(
-      caller.catalog.restockBook({ bookId, quantityToAdd: 5 })
+      employeeCaller.catalog.restockBook({ bookId, quantityToAdd: 5 })
     ).resolves.toEqual({ bookId, stock: startingStock + 5 });
     await expect(
       appRouter.createCaller(createContext(customer)).catalog.restockBook({
@@ -73,15 +76,18 @@ describe("role-based account procedures", () => {
       id: bookId,
       stock: startingStock + 5,
     });
+    const stockCheckBook = await getCatalogBook("project-hail-mary");
+    if (!stockCheckBook || stockCheckBook.stock >= 20)
+      throw new Error("Stock-check test book must have fewer than 20 copies");
     await expect(
-      caller.store.addToCart({
+      customerCaller.store.addToCart({
         sessionId: `inventory-cart-${crypto.randomUUID()}`,
-        bookId,
-        quantity: startingStock + 6,
+        bookId: stockCheckBook.id,
+        quantity: stockCheckBook.stock + 1,
       })
     ).rejects.toMatchObject({
       code: "BAD_REQUEST",
-      message: `Only ${startingStock + 5} copies are available`,
+      message: `Only ${stockCheckBook.stock} copies are available`,
     });
   });
 
@@ -154,6 +160,94 @@ describe("role-based account procedures", () => {
     ).resolves.toMatchObject({ role: "employee" });
   });
 
+  it("isolates staff shopping and provides employee reports to authorized roles", async () => {
+    vi.stubEnv("DATABASE_URL", "");
+    const employee = await createLocalUser({
+      name: "Report Employee",
+      email: `report-employee-${crypto.randomUUID()}@example.test`,
+      password: "report-test-password-2026",
+      role: "employee",
+    });
+    const admin = await createLocalUser({
+      name: "Report Admin",
+      email: `report-admin-${crypto.randomUUID()}@example.test`,
+      password: "report-test-password-2026",
+      role: "admin",
+    });
+    const customer = await createLocalUser({
+      name: "Report Customer",
+      email: `report-customer-${crypto.randomUUID()}@example.test`,
+      password: "report-test-password-2026",
+      role: "user",
+    });
+    const employeeCaller = appRouter.createCaller(createContext(employee));
+    const adminCaller = appRouter.createCaller(createContext(admin));
+    const customerCaller = appRouter.createCaller(createContext(customer));
+    const reportText = `Restocked books ${crypto.randomUUID()}`;
+
+    await expect(
+      employeeCaller.reports.submit({ reportText })
+    ).resolves.toMatchObject({
+      employeeId: employee.id,
+      employeeName: employee.name,
+      employeeEmail: employee.email,
+      reportText,
+    });
+    await expect(employeeCaller.reports.mine()).resolves.toMatchObject([
+      { reportText, employeeId: employee.id },
+    ]);
+    const allReports = await adminCaller.reports.all();
+    expect(allReports[0]).toMatchObject({
+      reportText,
+      employeeId: employee.id,
+    });
+    expect(allReports).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ reportText, employeeId: employee.id }),
+      ])
+    );
+    await expect(
+      customerCaller.reports.submit({ reportText })
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      adminCaller.reports.submit({ reportText })
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      customerCaller.admin.buyerAnalytics()
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      employeeCaller.admin.buyerAnalytics()
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(adminCaller.admin.buyerAnalytics()).resolves.toEqual({
+      daily: expect.any(Number),
+      monthly: expect.any(Number),
+      yearly: expect.any(Number),
+    });
+
+    const existingOrders = listOrders(employee).length;
+    await expect(
+      employeeCaller.checkout.createOrder({
+        sessionId: `staff-checkout-${crypto.randomUUID()}`,
+        firstName: "Report",
+        lastName: "Employee",
+        email: employee.email,
+        address: "12 Mabini Street",
+        city: "Manila",
+        postcode: "1000",
+        paymentMethod: "gcash",
+      })
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      employeeCaller.store.addToCart({
+        sessionId: `staff-cart-${crypto.randomUUID()}`,
+        bookId: "project-hail-mary",
+        quantity: 1,
+      })
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(listOrders(employee)).toHaveLength(existingOrders);
+    expect(listEmployeeReports(employee)).toHaveLength(1);
+  });
+
   it.each([
     ["user", "/"],
     ["employee", "/employee"],
@@ -196,6 +290,7 @@ describe("role-based account procedures", () => {
     if (typeof startingStock !== "number")
       throw new Error("Book stock is missing");
     const sessionId = `checkout-${crypto.randomUUID()}`;
+    const buyersBefore = getBuyerAnalytics();
     await addToCart(sessionId, bookId, 1);
 
     const result = await appRouter
@@ -230,6 +325,31 @@ describe("role-based account procedures", () => {
     });
     expect((await getCatalogBook(bookId))?.stock).toBe(startingStock - 1);
     expect((await getStoreState(sessionId)).cart).toEqual([]);
+    expect(getBuyerAnalytics()).toEqual({
+      daily: buyersBefore.daily + 1,
+      monthly: buyersBefore.monthly + 1,
+      yearly: buyersBefore.yearly + 1,
+    });
+
+    const secondSessionId = `checkout-same-buyer-${crypto.randomUUID()}`;
+    await addToCart(secondSessionId, "on-looking", 1);
+    await appRouter
+      .createCaller(createContext(customer))
+      .checkout.createOrder({
+        sessionId: secondSessionId,
+        firstName: "Checkout",
+        lastName: "Customer",
+        email: customer.email,
+        address: "12 Mabini Street",
+        city: "Manila",
+        postcode: "1000",
+        paymentMethod: "gcash",
+      });
+    expect(getBuyerAnalytics()).toEqual({
+      daily: buyersBefore.daily + 1,
+      monthly: buyersBefore.monthly + 1,
+      yearly: buyersBefore.yearly + 1,
+    });
   });
 
   it("rejects direct sandbox checkout outside development", async () => {

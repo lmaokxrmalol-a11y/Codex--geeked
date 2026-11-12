@@ -21,6 +21,7 @@ export default function AccountSupport({
     number | null
   >(null);
   const [error, setError] = useState("");
+  const [reportError, setReportError] = useState("");
   const utils = trpc.useUtils();
   const me = trpc.auth.me.useQuery();
   const role = me.data?.role;
@@ -37,6 +38,15 @@ export default function AccountSupport({
     enabled: Boolean(role && role !== "user"),
     refetchInterval: 10000,
   });
+  const myReports = trpc.reports.mine.useQuery(undefined, {
+    enabled: role === "employee",
+  });
+  const allReports = trpc.reports.all.useQuery(undefined, {
+    enabled: role === "admin",
+  });
+  const buyerAnalytics = trpc.admin.buyerAnalytics.useQuery(undefined, {
+    enabled: role === "admin",
+  });
   const login = trpc.auth.login.useMutation();
   const register = trpc.auth.register.useMutation();
   const logout = trpc.auth.logout.useMutation();
@@ -46,6 +56,7 @@ export default function AccountSupport({
   const createEmployee = trpc.auth.createEmployee.useMutation();
   const setOrderStatus = trpc.commerce.setOrderStatus.useMutation();
   const restockBook = trpc.catalog.restockBook.useMutation();
+  const submitReport = trpc.reports.submit.useMutation();
   useEffect(() => {
     if (openRequest > 0) setOpen(true);
   }, [openRequest]);
@@ -83,6 +94,27 @@ export default function AccountSupport({
     }
   };
 
+  const submitDailyReport = async (
+    event: React.FormEvent<HTMLFormElement>
+  ) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    setReportError("");
+    try {
+      const reportText = String(new FormData(form).get("reportText") ?? "");
+      await submitReport.mutateAsync({ reportText });
+      form.reset();
+      await Promise.all([
+        utils.reports.mine.invalidate(),
+        utils.reports.all.invalidate(),
+      ]);
+    } catch (reason) {
+      setReportError(
+        reason instanceof Error ? reason.message : "Could not submit report"
+      );
+    }
+  };
+
   const refreshAccount = async () => {
     const { data: user } = await me.refetch();
     if (user) {
@@ -90,11 +122,17 @@ export default function AccountSupport({
         utils.support.list.invalidate(),
         utils.commerce.orders.invalidate(),
         utils.commerce.transactions.invalidate(),
+        utils.reports.mine.invalidate(),
+        utils.reports.all.invalidate(),
+        utils.admin.buyerAnalytics.invalidate(),
       ]);
       return;
     }
     utils.support.list.setData(undefined, undefined);
     utils.commerce.orders.setData(undefined, undefined);
+    utils.reports.mine.setData(undefined, undefined);
+    utils.reports.all.setData(undefined, undefined);
+    utils.admin.buyerAnalytics.setData(undefined, undefined);
   };
 
   const submitAuth = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -632,6 +670,150 @@ export default function AccountSupport({
                       )}
                     </section>
                   </div>
+                  {role === "admin" && (
+                    <section className="staff-insights">
+                      <div className="inventory-management__heading">
+                        <div>
+                          <span className="eyebrow">
+                            <span className="eyebrow__line" /> Buyer analytics
+                          </span>
+                          <h3>Book buyers</h3>
+                        </div>
+                      </div>
+                      {buyerAnalytics.isLoading ? (
+                        <p className="account-help">
+                          Loading buyer analytics…
+                        </p>
+                      ) : buyerAnalytics.isError ? (
+                        <p className="checkout-error">
+                          {buyerAnalytics.error.message}
+                        </p>
+                      ) : buyerAnalytics.data ? (
+                        <div className="analytics-cards">
+                          <article className="analytics-card">
+                            <span>Daily</span>
+                            <strong>{buyerAnalytics.data.daily}</strong>
+                            <small>Distinct customers today</small>
+                          </article>
+                          <article className="analytics-card">
+                            <span>Monthly</span>
+                            <strong>{buyerAnalytics.data.monthly}</strong>
+                            <small>Distinct customers this month</small>
+                          </article>
+                          <article className="analytics-card">
+                            <span>Yearly</span>
+                            <strong>{buyerAnalytics.data.yearly}</strong>
+                            <small>Distinct customers this year</small>
+                          </article>
+                        </div>
+                      ) : null}
+                    </section>
+                  )}
+                  {role === "employee" && (
+                    <section className="staff-insights">
+                      <div className="inventory-management__heading">
+                        <div>
+                          <span className="eyebrow">
+                            <span className="eyebrow__line" /> Daily progress
+                          </span>
+                          <h3>Progress reports</h3>
+                        </div>
+                      </div>
+                      <form
+                        className="daily-report-form"
+                        onSubmit={event => void submitDailyReport(event)}
+                      >
+                        <label>
+                          What did you accomplish today?
+                          <textarea
+                            name="reportText"
+                            rows={4}
+                            maxLength={10000}
+                            required
+                            placeholder="Summarize your work, restocking, and customer support for today…"
+                          />
+                        </label>
+                        {reportError && (
+                          <p className="checkout-error">{reportError}</p>
+                        )}
+                        <button
+                          className="button button--secondary"
+                          disabled={submitReport.isPending}
+                        >
+                          {submitReport.isPending
+                            ? "Submitting…"
+                            : "Submit daily report"}
+                        </button>
+                      </form>
+                      <h4>Your report history</h4>
+                      {myReports.isLoading ? (
+                        <p className="account-help">Loading reports…</p>
+                      ) : myReports.isError ? (
+                        <p className="checkout-error">
+                          {myReports.error.message}
+                        </p>
+                      ) : myReports.data?.length ? (
+                        <div className="daily-report-list">
+                          {myReports.data.map(report => (
+                            <article
+                              className="daily-report"
+                              key={report.id}
+                            >
+                              <small>
+                                {new Date(report.createdAt).toLocaleString()}
+                              </small>
+                              <p>{report.reportText}</p>
+                            </article>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="account-help">
+                          No daily progress reports submitted yet.
+                        </p>
+                      )}
+                    </section>
+                  )}
+                  {role === "admin" && (
+                    <section className="staff-insights">
+                      <div className="inventory-management__heading">
+                        <div>
+                          <span className="eyebrow">
+                            <span className="eyebrow__line" /> Team activity
+                          </span>
+                          <h3>Employee daily progress</h3>
+                        </div>
+                      </div>
+                      {allReports.isLoading ? (
+                        <p className="account-help">Loading reports…</p>
+                      ) : allReports.isError ? (
+                        <p className="checkout-error">
+                          {allReports.error.message}
+                        </p>
+                      ) : allReports.data?.length ? (
+                        <div className="daily-report-list">
+                          {allReports.data.map(report => (
+                            <article
+                              className="daily-report"
+                              key={report.id}
+                            >
+                              <div>
+                                <strong>{report.employeeName}</strong>
+                                <small>{report.employeeEmail}</small>
+                              </div>
+                              <time dateTime={report.createdAt}>
+                                {new Date(report.createdAt).toLocaleString()}
+                              </time>
+                              <p>{report.reportText}</p>
+                            </article>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="account-help">
+                          No daily progress reports submitted yet.
+                        </p>
+                      )}
+                    </section>
+                  )}
                   {role !== "user" && (
                     <section className="inventory-management">
                       <div className="inventory-management__heading">
@@ -655,7 +837,7 @@ export default function AccountSupport({
                             <thead>
                               <tr>
                                 <th>Book</th>
-                                <th>Stock</th>
+                                <th>Availability</th>
                                 <th>Restock</th>
                               </tr>
                             </thead>
@@ -671,10 +853,10 @@ export default function AccountSupport({
                                       className={`stock-badge${book.stock === 0 ? " is-out" : book.stock < 5 ? " is-low" : ""}`}
                                     >
                                       {book.stock === 0
-                                        ? "Out of stock"
+                                        ? "Out of Stock (0)"
                                         : book.stock < 5
-                                          ? `Low: ${book.stock}`
-                                          : `${book.stock} available`}
+                                          ? `Low Stock (${book.stock} left)`
+                                          : `In Stock (${book.stock} available)`}
                                     </span>
                                   </td>
                                   <td>

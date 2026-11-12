@@ -74,6 +74,14 @@ database.exec(`
     checkout_url TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
+  CREATE TABLE IF NOT EXISTS employee_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id INTEGER NOT NULL REFERENCES local_users(id) ON DELETE CASCADE,
+    employee_name TEXT NOT NULL,
+    employee_email TEXT NOT NULL,
+    report_text TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
   CREATE TABLE IF NOT EXISTS local_transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     order_id INTEGER NOT NULL UNIQUE REFERENCES local_orders(id) ON DELETE CASCADE,
@@ -392,6 +400,61 @@ export async function createEmployee(input: {
   return createLocalUser({ ...input, role: "employee" });
 }
 
+export type EmployeeReport = {
+  id: number;
+  employeeId: number;
+  employeeName: string;
+  employeeEmail: string;
+  reportText: string;
+  createdAt: string;
+};
+
+function toEmployeeReport(row: Record<string, unknown>): EmployeeReport {
+  const createdAt = String(row.created_at).replace(" ", "T") + "Z";
+  return {
+    id: Number(row.id),
+    employeeId: Number(row.employee_id),
+    employeeName: String(row.employee_name),
+    employeeEmail: String(row.employee_email),
+    reportText: String(row.report_text),
+    createdAt,
+  };
+}
+
+export function createEmployeeReport(employee: LocalUser, reportText: string) {
+  if (employee.role !== "employee")
+    throw new Error("Only employees can submit daily progress reports");
+  const text = reportText.trim();
+  if (!text) throw new Error("Report text is required");
+  const result = database
+    .prepare(
+      `INSERT INTO employee_reports
+        (employee_id, employee_name, employee_email, report_text)
+       VALUES (?, ?, ?, ?)`
+    )
+    .run(employee.id, employee.name, employee.email, text);
+  const row = database
+    .prepare("SELECT * FROM employee_reports WHERE id = ?")
+    .get(Number(result.lastInsertRowid)) as Record<string, unknown> | undefined;
+  if (!row) throw new Error("Could not save daily progress report");
+  return toEmployeeReport(row);
+}
+
+export function listEmployeeReports(employee?: LocalUser) {
+  const rows = employee
+    ? database
+        .prepare(
+          "SELECT * FROM employee_reports WHERE employee_id = ? ORDER BY created_at DESC, id DESC"
+        )
+        .all(employee.id)
+    : database
+        .prepare(
+          "SELECT * FROM employee_reports ORDER BY created_at DESC, id DESC"
+        )
+        .all();
+  return (rows as Record<string, unknown>[]).map(toEmployeeReport);
+}
+
 type ConversationRow = Record<string, unknown>;
 
 function listMessages(conversationId: number) {
@@ -671,6 +734,34 @@ export function listOrders(user: LocalUser) {
     )
     .all(...(user.role === "user" ? [user.id] : []));
   return (rows as Record<string, unknown>[]).map(formatOrder);
+}
+
+export function getBuyerAnalytics() {
+  const row = database
+    .prepare(
+      `SELECT
+        COUNT(DISTINCT CASE
+          WHEN date(created_at) = date('now') THEN user_id
+        END) AS daily,
+        COUNT(DISTINCT CASE
+          WHEN created_at >= datetime('now', 'start of month')
+            AND created_at < datetime('now', 'start of month', '+1 month')
+            THEN user_id
+        END) AS monthly,
+        COUNT(DISTINCT CASE
+          WHEN created_at >= datetime('now', 'start of year')
+            AND created_at < datetime('now', 'start of year', '+1 year')
+            THEN user_id
+        END) AS yearly
+      FROM local_orders
+      WHERE status IN ('paid', 'fulfilled')`
+    )
+    .get() as { daily: number; monthly: number; yearly: number };
+  return {
+    daily: Number(row.daily),
+    monthly: Number(row.monthly),
+    yearly: Number(row.yearly),
+  };
 }
 
 export function listTransactions(user: LocalUser) {

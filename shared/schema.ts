@@ -125,6 +125,17 @@ export const orderItems = mysqlTable("orderItems", {
   quantity: int("quantity").notNull(),
 });
 
+export const employeeReports = mysqlTable("employeeReports", {
+  id: int("id").autoincrement().primaryKey(),
+  employeeId: int("employeeId")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  employeeName: text("employeeName").notNull(),
+  employeeEmail: varchar("employeeEmail", { length: 320 }).notNull(),
+  reportText: text("reportText").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type BookRow = typeof books.$inferSelect;
