@@ -134,7 +134,9 @@ export function restockLocalBook(bookId: string, quantityToAdd: number) {
     .prepare("UPDATE local_inventory SET stock = stock + ? WHERE book_id = ?")
     .run(quantityToAdd, bookId);
   if (Number(result.changes) === 0) throw new Error("Book not found");
-  return getLocalBookStock(bookId);
+  const stock = getLocalBookStock(bookId);
+  if (stock === null) throw new Error("Book not found");
+  return stock;
 }
 
 function deductLocalInventory(items: LocalOrderItem[]) {

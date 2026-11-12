@@ -155,6 +155,64 @@ function OrderConfirmation({ orderId }: { orderId: number }) {
 }
 
 export default function App() {
+  const currentUser = trpc.auth.me.useQuery();
+  const path = window.location.pathname.replace(/\/+$/, "") || "/";
+  const requiredRole =
+    path === "/admin" ? "admin" : path === "/employee" ? "employee" : null;
+  const actualStaffRoute =
+    currentUser.data?.role === "admin"
+      ? "/admin"
+      : currentUser.data?.role === "employee"
+        ? "/employee"
+        : null;
+  const redirectTo =
+    currentUser.isPending || currentUser.isError
+      ? null
+      : requiredRole
+        ? currentUser.data?.role !== requiredRole
+          ? (actualStaffRoute ?? "/")
+          : null
+        : actualStaffRoute && path !== actualStaffRoute
+          ? actualStaffRoute
+          : null;
+
+  useEffect(() => {
+    if (redirectTo) window.location.replace(redirectTo);
+  }, [redirectTo]);
+
+  if (currentUser.isPending || redirectTo || currentUser.isError) {
+    return (
+      <main className="staff-route-status" aria-live="polite">
+        <div>
+          <strong>Codex-Geeked</strong>
+          <p>
+            {currentUser.isError
+              ? "We couldn’t verify your session."
+              : redirectTo
+                ? "Taking you to your workspace…"
+                : "Checking your session…"}
+          </p>
+          {currentUser.isError && (
+            <button
+              className="button button--secondary"
+              onClick={() => void currentUser.refetch()}
+            >
+              Try again
+            </button>
+          )}
+        </div>
+      </main>
+    );
+  }
+
+  if (requiredRole) {
+    return <AccountSupport mode="workspace" />;
+  }
+
+  return <Storefront />;
+}
+
+function Storefront() {
   const sessionId = useMemo(() => getBookshopSessionId(), []);
   const [activeCategory, setActiveCategory] = useState<BookCategory>("All");
   const [search, setSearch] = useState("");
@@ -168,7 +226,7 @@ export default function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [accountOpenRequest, setAccountOpenRequest] = useState(() => {
     const path = window.location.pathname;
-    return ["/admin", "/employee", "/account/orders"].includes(path) ||
+    return ["/account/orders"].includes(path) ||
       new URLSearchParams(window.location.search).has("account")
       ? 1
       : 0;
@@ -192,8 +250,7 @@ export default function App() {
   const createOrderMutation = trpc.checkout.createOrder.useMutation();
   const utils = trpc.useUtils();
   const canPurchase =
-    currentUser.data?.role !== "employee" &&
-    currentUser.data?.role !== "admin";
+    currentUser.data?.role !== "employee" && currentUser.data?.role !== "admin";
 
   useEffect(() => {
     if (!notice) return;

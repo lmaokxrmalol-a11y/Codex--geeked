@@ -2210,6 +2210,105 @@ h2 em {
   max-height: 85dvh;
   overflow-y: auto;
 }
+.staff-workspace {
+  min-height: 100vh;
+  background: var(--paper);
+}
+.staff-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-height: 76px;
+  padding: 12px clamp(18px, 5vw, 64px);
+  color: var(--ink);
+  background: var(--white);
+  border-bottom: 1px solid var(--line);
+}
+.staff-header__brand,
+.staff-header__user {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.staff-header__brand > strong {
+  font-family: var(--serif);
+  font-size: 19px;
+}
+.staff-header__mark {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  color: var(--moss);
+  background: var(--paper-deep);
+  border-radius: 50%;
+}
+.staff-header__badge {
+  padding: 6px 9px;
+  color: var(--moss);
+  background: var(--paper-deep);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.staff-header__user > span {
+  display: grid;
+  gap: 3px;
+  text-align: right;
+}
+.staff-header__user strong {
+  font-size: 12px;
+}
+.staff-header__user small {
+  color: var(--muted);
+  font-size: 10px;
+}
+.staff-header__user .button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.staff-workspace__main {
+  width: min(1500px, 100%);
+  margin: 0 auto;
+  padding: clamp(20px, 4vw, 48px);
+}
+.staff-workspace__content {
+  width: 100%;
+  padding: clamp(20px, 3.5vw, 42px);
+  background: var(--white);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(35, 40, 30, 0.06);
+}
+.staff-route-status {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+  color: var(--ink);
+  background: var(--paper);
+  text-align: center;
+}
+.staff-route-status > div {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+}
+.staff-route-status strong {
+  font-family: var(--serif);
+  font-size: 24px;
+}
+.staff-route-status p {
+  margin: 0;
+  color: var(--muted);
+}
 .account-panel__header {
   display: flex;
   justify-content: space-between;
@@ -2379,56 +2478,113 @@ h2 em {
   color: var(--muted);
   font-size: 11px;
 }
-.inventory-table {
+.inventory-card-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+}
+.inventory-card {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: #1a1a21;
+  border: 1px solid #303039;
+  border-radius: 10px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
+}
+.inventory-card__cover {
   width: 100%;
-  border-collapse: collapse;
-  font-size: 11px;
+  aspect-ratio: 2 / 3;
+  overflow: hidden;
+  background: #202027;
 }
-.inventory-table th,
-.inventory-table td {
-  padding: 10px;
-  border-bottom: 1px solid var(--line);
-  text-align: left;
-}
-.inventory-table th {
-  color: var(--muted);
-  background: var(--paper-deep);
-  font-size: 9px;
-  text-transform: uppercase;
-}
-.inventory-table td:first-child {
-  min-width: 180px;
-}
-.inventory-table td strong,
-.inventory-table td small {
+.inventory-card__cover-image {
   display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
-.inventory-table td small {
-  margin-top: 3px;
-  color: var(--muted);
-  font-size: 10px;
+.inventory-card__cover-fallback,
+.inventory-card__cover-fallback > .book-cover {
+  width: 100%;
+  height: 100%;
 }
-.stock-badge {
-  color: var(--moss);
+.inventory-card__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 13px;
+  padding: 15px;
+  color: #f5f5f7;
+}
+.inventory-card__book-info h4 {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.35;
+}
+.inventory-card__book-info p {
+  margin: 5px 0 0;
+  color: #a4a4b2;
+  font-size: 12px;
+}
+.inventory-card__availability {
+  align-self: flex-start;
+  padding: 6px 9px;
+  color: #b7efce;
+  background: rgba(57, 153, 94, 0.16);
+  border: 1px solid rgba(89, 190, 126, 0.28);
+  border-radius: 999px;
+  font-size: 11px;
   font-weight: 700;
-  white-space: nowrap;
+}
+.inventory-card__availability.is-low {
+  color: #ffd58a;
+  background: rgba(190, 130, 35, 0.16);
+  border-color: rgba(225, 167, 73, 0.3);
+}
+.inventory-card__availability.is-out {
+  color: #ffaaa3;
+  background: rgba(194, 66, 58, 0.16);
+  border-color: rgba(226, 95, 85, 0.3);
 }
 .inventory-restock-form {
   display: flex;
+  width: 100%;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  margin-top: auto;
 }
 .inventory-restock-form input {
-  width: 74px;
-  min-height: 34px;
-  padding: 5px 8px;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  background: var(--white);
+  width: 0;
+  min-width: 0;
+  min-height: 38px;
+  flex: 1;
+  padding: 7px 10px;
+  color: #f5f5f7;
+  border: 1px solid #3b3b47;
+  border-radius: 6px;
+  background: #111116;
 }
 .inventory-restock-form .button {
-  min-height: 34px;
-  padding: 0 10px;
+  min-height: 38px;
+  padding: 0 13px;
+  white-space: nowrap;
+}
+@media (min-width: 640px) {
+  .inventory-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (min-width: 768px) {
+  .inventory-card-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (min-width: 1024px) {
+  .inventory-card-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 .staff-insights {
   margin-top: 24px;
@@ -2656,6 +2812,25 @@ h2 em {
   margin-top: 8px;
 }
 @media (max-width: 720px) {
+  .staff-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px 16px;
+  }
+  .staff-header__user {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .staff-header__user > span {
+    text-align: left;
+  }
+  .staff-workspace__main {
+    padding: 14px;
+  }
+  .staff-workspace__content {
+    padding: 18px 14px;
+  }
   .account-backdrop {
     padding: 8px;
   }
