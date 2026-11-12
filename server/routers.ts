@@ -10,13 +10,13 @@ import {
 import { systemRouter } from "./_core/systemRouter";
 import {
   adminProcedure,
+  employeeProcedure,
   protectedProcedure,
   publicProcedure,
   router,
 } from "./_core/trpc";
 import {
   cancelLocalOrder,
-  completeLocalSandboxPayment,
   createEmployee,
   createLocalSession,
   createLocalUser,
@@ -43,6 +43,8 @@ import {
   getCatalogBook,
   getStoreState,
   listCatalog,
+  restockBook,
+  completeLocalOrderPayment,
   removeFromCart,
   setCartQuantity,
   toggleWishlist,
@@ -224,6 +226,15 @@ export const appRouter = router({
   }),
   catalog: router({
     list: publicProcedure.query(() => listCatalog()),
+    inventory: employeeProcedure.query(() => listCatalog()),
+    restockBook: employeeProcedure
+      .input(
+        z.object({
+          bookId,
+          quantityToAdd: z.number().int().min(1).max(100000),
+        })
+      )
+      .mutation(({ input }) => restockBook(input.bookId, input.quantityToAdd)),
     get: publicProcedure
       .input(z.object({ id: bookId }))
       .query(({ input }) => getCatalogBook(input.id)),
@@ -243,9 +254,19 @@ export const appRouter = router({
           quantity: z.number().int().min(1).max(20).default(1),
         })
       )
-      .mutation(({ input }) =>
-        addToCart(input.sessionId, input.bookId, input.quantity)
-      ),
+      .mutation(async ({ input }) => {
+        try {
+          return await addToCart(input.sessionId, input.bookId, input.quantity);
+        } catch (error) {
+          if (error instanceof Error && error.message.startsWith("Only ")) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: error.message,
+            });
+          }
+          throw error;
+        }
+      }),
     setCartQuantity: publicProcedure
       .input(
         z.object({
@@ -254,9 +275,23 @@ export const appRouter = router({
           quantity: z.number().int().min(0).max(20),
         })
       )
-      .mutation(({ input }) =>
-        setCartQuantity(input.sessionId, input.bookId, input.quantity)
-      ),
+      .mutation(async ({ input }) => {
+        try {
+          return await setCartQuantity(
+            input.sessionId,
+            input.bookId,
+            input.quantity
+          );
+        } catch (error) {
+          if (error instanceof Error && error.message.startsWith("Only ")) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: error.message,
+            });
+          }
+          throw error;
+        }
+      }),
     removeFromCart: publicProcedure
       .input(z.object({ sessionId, bookId }))
       .mutation(({ input }) => removeFromCart(input.sessionId, input.bookId)),
@@ -312,7 +347,7 @@ export const appRouter = router({
           });
           orderId = order.orderId;
           if (useLocalPayment) {
-            if (!completeLocalSandboxPayment(orderId)) {
+            if (!(await completeLocalOrderPayment(orderId))) {
               throw new Error("Could not complete the local test payment");
             }
             await clearCart(input.sessionId);
@@ -350,6 +385,7 @@ export const appRouter = router({
           if (
             error instanceof Error &&
             (error.message === "Your cart is empty" ||
+              error.message.startsWith("Only ") ||
               error.message.startsWith("Payments are not configured") ||
               error.message.startsWith("Set ") ||
               error.message.startsWith("PAYMONGO_") ||

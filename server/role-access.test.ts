@@ -7,7 +7,7 @@ import {
   listOrders,
   listTransactions,
 } from "./localStore";
-import { addToCart, getStoreState } from "./db";
+import { addToCart, getCatalogBook, getStoreState } from "./db";
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -40,6 +40,51 @@ function createAnonymousContext(onCookie: (value: string) => void = () => {}) {
 }
 
 describe("role-based account procedures", () => {
+  it("allows employees to restock books and exposes the updated stock publicly", async () => {
+    vi.stubEnv("DATABASE_URL", "");
+    const employee = await createLocalUser({
+      name: "Inventory Employee",
+      email: `inventory-employee-${crypto.randomUUID()}@example.test`,
+      password: "inventory-test-password",
+      role: "employee",
+    });
+    const customer = await createLocalUser({
+      name: "Inventory Customer",
+      email: `inventory-customer-${crypto.randomUUID()}@example.test`,
+      password: "inventory-test-password",
+      role: "user",
+    });
+    const bookId = "the-map-of-small-things";
+    const startingStock = (await getCatalogBook(bookId))?.stock;
+    if (typeof startingStock !== "number")
+      throw new Error("Book stock is missing");
+    const caller = appRouter.createCaller(createContext(employee));
+
+    await expect(
+      caller.catalog.restockBook({ bookId, quantityToAdd: 5 })
+    ).resolves.toEqual({ bookId, stock: startingStock + 5 });
+    await expect(
+      appRouter.createCaller(createContext(customer)).catalog.restockBook({
+        bookId,
+        quantityToAdd: 5,
+      })
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(getCatalogBook(bookId)).resolves.toMatchObject({
+      id: bookId,
+      stock: startingStock + 5,
+    });
+    await expect(
+      caller.store.addToCart({
+        sessionId: `inventory-cart-${crypto.randomUUID()}`,
+        bookId,
+        quantity: startingStock + 6,
+      })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: `Only ${startingStock + 5} copies are available`,
+    });
+  });
+
   it("registers customers and issues a local HTTP-only session cookie", async () => {
     let sessionToken = "";
     let cookieOptions: Record<string, unknown> = {};
@@ -146,8 +191,12 @@ describe("role-based account procedures", () => {
       password: "checkout-test-password",
       role: "user",
     });
+    const bookId = "project-hail-mary";
+    const startingStock = (await getCatalogBook(bookId))?.stock;
+    if (typeof startingStock !== "number")
+      throw new Error("Book stock is missing");
     const sessionId = `checkout-${crypto.randomUUID()}`;
-    await addToCart(sessionId, "project-hail-mary", 1);
+    await addToCart(sessionId, bookId, 1);
 
     const result = await appRouter
       .createCaller(createContext(customer))
@@ -179,6 +228,7 @@ describe("role-based account procedures", () => {
       paymentMethod: "gcash",
       status: "completed",
     });
+    expect((await getCatalogBook(bookId))?.stock).toBe(startingStock - 1);
     expect((await getStoreState(sessionId)).cart).toEqual([]);
   });
 

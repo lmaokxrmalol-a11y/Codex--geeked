@@ -15,6 +15,8 @@ import {
   completeLocalSandboxPayment,
   attachCheckoutSession,
   markOrderPaid,
+  getLocalBookStock,
+  restockLocalBook,
 } from "./localStore";
 
 const uniqueEmail = (label: string) =>
@@ -94,6 +96,9 @@ describe("local accounts and support", () => {
   });
 
   it("separates system and book-support queues and gives customers an FAQ reply", async () => {
+    const bookId = "soft-edges";
+    expect(getLocalBookStock(bookId)).toBe(10);
+    expect(restockLocalBook(bookId, 4)).toBe(14);
     const customer = await createLocalUser({
       name: "Support Customer",
       email: uniqueEmail("support"),
@@ -151,7 +156,7 @@ describe("local accounts and support", () => {
       postcode: "1000",
       items: [
         {
-          bookId: "test-book",
+          bookId,
           title: "Test Book",
           priceCents: 50000,
           quantity: 1,
@@ -174,8 +179,9 @@ describe("local accounts and support", () => {
         orderStatus: "pending",
       },
     ]);
-    expect(completeLocalSandboxPayment(orderId)).toBe(true);
-    expect(completeLocalSandboxPayment(orderId)).toBe(false);
+    expect(await completeLocalSandboxPayment(orderId)).toBe(true);
+    expect(await completeLocalSandboxPayment(orderId)).toBe(false);
+    expect(getLocalBookStock(bookId)).toBe(13);
     expect(listOrders(customer)[0]).toMatchObject({
       id: orderId,
       status: "paid",
@@ -209,9 +215,13 @@ describe("local accounts and support", () => {
       "cs_test_store_order",
       "https://checkout.paymongo.com/cs_test_store_order"
     );
-    expect(markOrderPaid(onlineOrderId, "wrong-session")).toBe(false);
-    expect(markOrderPaid(onlineOrderId, "cs_test_store_order")).toBe(true);
-    expect(markOrderPaid(onlineOrderId, "cs_test_store_order")).toBe(true);
+    expect(await markOrderPaid(onlineOrderId, "wrong-session")).toBe(false);
+    expect(await markOrderPaid(onlineOrderId, "cs_test_store_order")).toBe(
+      true
+    );
+    expect(await markOrderPaid(onlineOrderId, "cs_test_store_order")).toBe(
+      true
+    );
     expect(listTransactions(customer)[0]).toMatchObject({
       orderId: onlineOrderId,
       paymentMethod: "gcash",

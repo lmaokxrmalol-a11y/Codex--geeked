@@ -7,6 +7,9 @@ export type BookCategory =
 
 export type Book = {
   id: string;
+  slug?: string;
+  coverImage?: string;
+  stock?: number;
   title: string;
   author: string;
   category: Exclude<BookCategory, "All">;

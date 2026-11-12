@@ -180,13 +180,16 @@ export default function App() {
   const [paymentMethod, setPaymentMethod] =
     useState<CheckoutPaymentMethod>("gcash");
 
-  const catalogQuery = trpc.catalog.list.useQuery();
+  const catalogQuery = trpc.catalog.list.useQuery(undefined, {
+    refetchInterval: 10000,
+  });
   const storeStateQuery = trpc.store.state.useQuery({ sessionId });
   const wishlistMutation = trpc.store.toggleWishlist.useMutation();
   const addToCartMutation = trpc.store.addToCart.useMutation();
   const setCartQuantityMutation = trpc.store.setCartQuantity.useMutation();
   const removeFromCartMutation = trpc.store.removeFromCart.useMutation();
   const createOrderMutation = trpc.checkout.createOrder.useMutation();
+  const utils = trpc.useUtils();
 
   useEffect(() => {
     if (!notice) return;
@@ -303,6 +306,11 @@ export default function App() {
   );
   const cartShipping = getShippingPrice(cartSubtotal);
   const cartTotal = cartSubtotal + cartShipping;
+  const selectedBookStock = selectedBook
+    ? (catalogBooks.find(book => book.id === selectedBook.id)?.stock ??
+      selectedBook.stock ??
+      10)
+    : 0;
   const announce = (message: string) => setNotice(message);
 
   const toggleWishlist = (book: Book) => {
@@ -327,23 +335,44 @@ export default function App() {
   };
 
   const addToCart = (book: Book) => {
+    const quantityInCart = cart[book.id] ?? 0;
+    const available =
+      catalogBooks.find(item => item.id === book.id)?.stock ?? book.stock ?? 10;
+    if (quantityInCart >= available) {
+      announce(
+        available === 0
+          ? `${book.title} is out of stock`
+          : `Only ${available} copies of ${book.title} are available`
+      );
+      return;
+    }
     setCart(current => ({
       ...current,
-      [book.id]: (current[book.id] ?? 0) + 1,
+      [book.id]: quantityInCart + 1,
     }));
     announce(`${book.title} added to your cart`);
     addToCartMutation.mutate(
       { sessionId, bookId: book.id, quantity: 1 },
       {
         onSuccess: applyStoreState,
-        onError: () =>
-          announce("We couldn’t save that book to your cart — try again"),
+        onError: async error => {
+          announce(error.message || "We couldn’t save that book to your cart");
+          const { data } = await storeStateQuery.refetch();
+          if (data) applyStoreState(data);
+        },
       }
     );
   };
 
   const updateQuantity = (bookId: string, change: number) => {
     const nextQuantity = (cart[bookId] ?? 0) + change;
+    const book = catalogBooks.find(item => item.id === bookId);
+    if (change > 0 && book && nextQuantity > (book.stock ?? 10)) {
+      announce(
+        `Only ${book.stock ?? 10} copies of ${book.title} are available`
+      );
+      return;
+    }
     setCart(current => {
       if (nextQuantity <= 0) {
         const { [bookId]: _, ...rest } = current;
@@ -355,7 +384,11 @@ export default function App() {
       { sessionId, bookId, quantity: Math.max(0, nextQuantity) },
       {
         onSuccess: applyStoreState,
-        onError: () => announce("We couldn’t update that quantity — try again"),
+        onError: async error => {
+          announce(error.message || "We couldn’t update that quantity");
+          const { data } = await storeStateQuery.refetch();
+          if (data) applyStoreState(data);
+        },
       }
     );
   };
@@ -405,6 +438,7 @@ export default function App() {
       setCart({});
       setCheckoutError("");
       setCheckoutOpen(false);
+      await utils.catalog.list.invalidate();
       await storeStateQuery.refetch();
       if (result.checkoutUrl) {
         window.location.assign(result.checkoutUrl);
@@ -673,6 +707,7 @@ export default function App() {
                   onWishlist={toggleWishlist}
                   onAdd={addToCart}
                   onOpen={setSelectedBook}
+                  quantityInCart={cart[book.id] ?? 0}
                 />
               )
             )}
@@ -769,6 +804,7 @@ export default function App() {
                   onWishlist={toggleWishlist}
                   onAdd={addToCart}
                   onOpen={setSelectedBook}
+                  quantityInCart={cart[book.id] ?? 0}
                 />
               ))}
             </div>
@@ -947,6 +983,15 @@ export default function App() {
               <h2>{selectedBook.title}</h2>
               <p className="detail-author">by {selectedBook.author}</p>
               <p className="detail-description">{selectedBook.description}</p>
+              <p
+                className={`book-stock${selectedBookStock === 0 ? " is-out" : selectedBookStock < 5 ? " is-low" : ""}`}
+              >
+                {selectedBookStock === 0
+                  ? "Out of stock"
+                  : selectedBookStock < 5
+                    ? `Low stock: ${selectedBookStock} left`
+                    : `${selectedBookStock} available`}
+              </p>
               <div className="detail-specs">
                 <span>
                   <strong>{selectedBook.pages}</strong> pages
@@ -967,6 +1012,10 @@ export default function App() {
                 <strong>{formatPrice(selectedBook.price)}</strong>
                 <button
                   className="button button--primary"
+                  disabled={
+                    selectedBookStock === 0 ||
+                    (cart[selectedBook.id] ?? 0) >= selectedBookStock
+                  }
                   onClick={() => {
                     addToCart(selectedBook);
                     setSelectedBook(null);
@@ -1052,6 +1101,9 @@ export default function App() {
                             <button
                               onClick={() => updateQuantity(book.id, 1)}
                               aria-label="Increase quantity"
+                              disabled={
+                                (cart[book.id] ?? 0) >= (book.stock ?? 10)
+                              }
                             >
                               <Plus size={13} />
                             </button>

@@ -2,11 +2,8 @@ import "dotenv/config";
 import express from "express";
 import { createServer } from "http";
 import type { Request } from "express";
-import {
-  bootstrapInitialAdmin,
-  markOrderPaid,
-  seedLocalTestAccounts,
-} from "../localStore";
+import { bootstrapInitialAdmin, seedLocalTestAccounts } from "../localStore";
+import { ensureCatalogIsCurrent, markLocalOrderPaymentPaid } from "../db";
 import { parsePaidCheckoutEvent, verifyPayMongoWebhook } from "../payments";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
@@ -18,6 +15,7 @@ import { serveStatic, setupVite } from "./vite";
 async function startServer() {
   await bootstrapInitialAdmin();
   await seedLocalTestAccounts();
+  if (process.env.DATABASE_URL) await ensureCatalogIsCurrent();
   const app = express();
   const server = createServer(app);
   // Configure body parser with larger size limit for file uploads
@@ -33,7 +31,7 @@ async function startServer() {
   );
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
-  app.post("/webhooks/paymongo", (req, res) => {
+  app.post("/webhooks/paymongo", async (req, res, next) => {
     if (!process.env.PAYMONGO_WEBHOOK_SECRET) {
       res
         .status(503)
@@ -55,11 +53,18 @@ async function startServer() {
         console.warn(
           "[Payments] Received a paid event without a valid order reference"
         );
-      } else if (!markOrderPaid(orderId, event.sessionId)) {
-        console.warn(
-          "[Payments] Paid event did not match a pending checkout session",
-          orderId
-        );
+      } else {
+        try {
+          if (!(await markLocalOrderPaymentPaid(orderId, event.sessionId))) {
+            console.warn(
+              "[Payments] Paid event did not match a pending checkout session",
+              orderId
+            );
+          }
+        } catch (error) {
+          next(error);
+          return;
+        }
       }
     }
     res.sendStatus(200);

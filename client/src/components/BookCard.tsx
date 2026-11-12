@@ -9,6 +9,7 @@ type BookCardProps = {
   onWishlist: (book: Book) => void;
   onAdd: (book: Book) => void;
   onOpen: (book: Book) => void;
+  quantityInCart?: number;
 };
 
 export default function BookCard({
@@ -17,7 +18,15 @@ export default function BookCard({
   onWishlist,
   onAdd,
   onOpen,
+  quantityInCart = 0,
 }: BookCardProps) {
+  const stock = book.stock ?? 10;
+  const stockLabel =
+    stock === 0
+      ? "Out of stock"
+      : stock < 5
+        ? `Low stock: ${stock} left`
+        : `${stock} available`;
   return (
     <article className="book-card">
       <div
@@ -64,12 +73,23 @@ export default function BookCard({
           {book.title}
         </button>
         <p className="book-card__author">{book.author}</p>
+        <p
+          className={`book-stock${stock === 0 ? " is-out" : stock < 5 ? " is-low" : ""}`}
+          aria-live="polite"
+        >
+          {stockLabel}
+        </p>
         <div className="book-card__footer">
           <strong className="book-card__price">
             {formatPrice(book.price)}
           </strong>
-          <button className="add-button" onClick={() => onAdd(book)}>
-            <ShoppingCart size={15} /> Add to cart
+          <button
+            className="add-button"
+            onClick={() => onAdd(book)}
+            disabled={stock === 0 || quantityInCart >= stock}
+          >
+            <ShoppingCart size={15} />{" "}
+            {stock === 0 ? "Out of stock" : "Add to cart"}
           </button>
         </div>
       </div>

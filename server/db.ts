@@ -1,9 +1,14 @@
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { books as seedBooks, getShippingPrice } from "../shared/books";
+import {
+  books as seedBooks,
+  getShippingPrice,
+  type Book,
+} from "../shared/books";
 import {
   books as booksTable,
   cartItems,
+  inventoryDeductions,
   orderItems,
   orders,
   type BookRow,
@@ -12,7 +17,15 @@ import {
   wishlistItems,
 } from "../shared/schema";
 import { ENV } from "./_core/env";
-import { saveLocalOrder, type LocalOrderItem } from "./localStore";
+import {
+  completeLocalSandboxPayment as finishLocalSandboxPayment,
+  getLocalBookStock,
+  listLocalInventory,
+  markOrderPaid as markLocalOrderPaid,
+  restockLocalBook,
+  saveLocalOrder,
+  type LocalOrderItem,
+} from "./localStore";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 let catalogSyncPromise: Promise<void> | undefined;
@@ -108,6 +121,7 @@ function serializeBook(row: BookRow) {
   }
   return {
     id: row.id,
+    slug: row.slug,
     title: row.title,
     author: row.author,
     category: row.category,
@@ -125,6 +139,8 @@ function serializeBook(row: BookRow) {
     tags,
     featured: row.featured === 1,
     badge: row.badge ?? undefined,
+    coverImage: row.coverImage ?? undefined,
+    stock: row.stock,
   };
 }
 
@@ -133,6 +149,7 @@ async function syncCatalog() {
   if (!db) throw new Error("Database is not available");
   const values = seedBooks.map(book => ({
     id: book.id,
+    slug: book.id,
     title: book.title,
     author: book.author,
     category: book.category,
@@ -147,6 +164,7 @@ async function syncCatalog() {
     coverColor: book.coverColor,
     coverAccent: book.coverAccent,
     coverLabel: book.coverLabel,
+    coverImage: null,
     tags: JSON.stringify(book.tags),
     featured: book.featured ? 1 : 0,
     badge: book.badge ?? null,
@@ -156,6 +174,7 @@ async function syncCatalog() {
     .values(values)
     .onDuplicateKeyUpdate({
       set: {
+        slug: sql`values(${booksTable.slug})`,
         title: sql`values(${booksTable.title})`,
         author: sql`values(${booksTable.author})`,
         category: sql`values(${booksTable.category})`,
@@ -187,9 +206,9 @@ export function ensureCatalogIsCurrent() {
   return catalogSyncPromise;
 }
 
-export async function listCatalog() {
+export async function listCatalog(): Promise<Array<Book & { stock: number }>> {
   const db = await getDb();
-  if (!db) return seedBooks;
+  if (!db) return listLocalInventory();
   await ensureCatalogIsCurrent();
   const rows = await db
     .select()
@@ -198,9 +217,11 @@ export async function listCatalog() {
   return rows.map(serializeBook);
 }
 
-export async function getCatalogBook(id: string) {
+export async function getCatalogBook(
+  id: string
+): Promise<(Book & { stock: number }) | null> {
   const db = await getDb();
-  if (!db) return seedBooks.find(book => book.id === id) ?? null;
+  if (!db) return listLocalInventory().find(book => book.id === id) ?? null;
   await ensureCatalogIsCurrent();
   const rows = await db
     .select()
@@ -208,6 +229,26 @@ export async function getCatalogBook(id: string) {
     .where(eq(booksTable.id, id))
     .limit(1);
   return rows[0] ? serializeBook(rows[0]) : null;
+}
+
+export async function restockBook(bookId: string, quantityToAdd: number) {
+  const db = await getDb();
+  if (!db) {
+    const stock = restockLocalBook(bookId, quantityToAdd);
+    return { bookId, stock };
+  }
+  await ensureCatalogIsCurrent();
+  const result = await db
+    .update(booksTable)
+    .set({ stock: sql`${booksTable.stock} + ${quantityToAdd}` })
+    .where(eq(booksTable.id, bookId));
+  if (!result[0].affectedRows) throw new Error("Book not found");
+  const rows = await db
+    .select({ stock: booksTable.stock })
+    .from(booksTable)
+    .where(eq(booksTable.id, bookId))
+    .limit(1);
+  return { bookId, stock: rows[0].stock };
 }
 
 export async function getStoreState(sessionId: string) {
@@ -275,10 +316,15 @@ export async function addToCart(
   const db = await getDb();
   if (!db) {
     assertSeedBookExists(bookId);
+    const available = getLocalBookStock(bookId) ?? 0;
     const cart = getLocalCart(sessionId);
-    cart.set(bookId, (cart.get(bookId) ?? 0) + quantity);
+    const nextQuantity = (cart.get(bookId) ?? 0) + quantity;
+    if (nextQuantity > available)
+      throw new Error(`Only ${available} copies are available`);
+    cart.set(bookId, nextQuantity);
     return getStoreState(sessionId);
   }
+  await ensureCatalogIsCurrent();
   const existing = await db
     .select({ id: cartItems.id, quantity: cartItems.quantity })
     .from(cartItems)
@@ -286,10 +332,19 @@ export async function addToCart(
       and(eq(cartItems.sessionId, sessionId), eq(cartItems.bookId, bookId))
     )
     .limit(1);
+  const bookRows = await db
+    .select({ stock: booksTable.stock })
+    .from(booksTable)
+    .where(eq(booksTable.id, bookId))
+    .limit(1);
+  const nextQuantity = (existing[0]?.quantity ?? 0) + quantity;
+  if (!bookRows[0]) throw new Error("Book is not in the catalog");
+  if (nextQuantity > bookRows[0].stock)
+    throw new Error(`Only ${bookRows[0].stock} copies are available`);
   if (existing[0])
     await db
       .update(cartItems)
-      .set({ quantity: existing[0].quantity + quantity })
+      .set({ quantity: nextQuantity })
       .where(eq(cartItems.id, existing[0].id));
   else await db.insert(cartItems).values({ sessionId, bookId, quantity });
   return getStoreState(sessionId);
@@ -304,10 +359,22 @@ export async function setCartQuantity(
   if (!db) {
     assertSeedBookExists(bookId);
     if (quantity <= 0) return removeFromCart(sessionId, bookId);
+    const available = getLocalBookStock(bookId) ?? 0;
+    if (quantity > available)
+      throw new Error(`Only ${available} copies are available`);
     getLocalCart(sessionId).set(bookId, quantity);
     return getStoreState(sessionId);
   }
   if (quantity <= 0) return removeFromCart(sessionId, bookId);
+  await ensureCatalogIsCurrent();
+  const bookRows = await db
+    .select({ stock: booksTable.stock })
+    .from(booksTable)
+    .where(eq(booksTable.id, bookId))
+    .limit(1);
+  if (!bookRows[0]) throw new Error("Book is not in the catalog");
+  if (quantity > bookRows[0].stock)
+    throw new Error(`Only ${bookRows[0].stock} copies are available`);
   await db
     .update(cartItems)
     .set({ quantity })
@@ -345,9 +412,18 @@ export async function createOrder(input: {
   const db = await getDb();
   if (!db) {
     const localCart = getLocalCart(input.sessionId);
+    const stockById = new Map(
+      listLocalInventory().map(book => [book.id, book.stock ?? 0])
+    );
     const localLines = [...localCart].flatMap(([bookId, quantity]) => {
       const book = seedBooks.find(item => item.id === bookId);
-      return book ? [{ book, quantity }] : [];
+      if (!book) return [];
+      const available = stockById.get(bookId) ?? 0;
+      if (quantity > available)
+        throw new Error(
+          `Only ${available} copies of ${book.title} are available`
+        );
+      return [{ book, quantity }];
     });
     if (localLines.length === 0) throw new Error("Your cart is empty");
     const subtotalCents = localLines.reduce(
@@ -398,12 +474,20 @@ export async function createOrder(input: {
       localOnly: true,
     };
   }
+  await ensureCatalogIsCurrent();
   const lines = await db
     .select({ cart: cartItems, book: booksTable })
     .from(cartItems)
     .innerJoin(booksTable, eq(cartItems.bookId, booksTable.id))
     .where(eq(cartItems.sessionId, input.sessionId));
   if (lines.length === 0) throw new Error("Your cart is empty");
+  for (const line of lines) {
+    if (line.cart.quantity > line.book.stock) {
+      throw new Error(
+        `Only ${line.book.stock} copies of ${line.book.title} are available`
+      );
+    }
+  }
   const subtotalCents = lines.reduce(
     (sum, line) => sum + line.book.priceCents * line.cart.quantity,
     0
@@ -480,6 +564,66 @@ export async function clearCart(sessionId: string) {
     return;
   }
   await db.delete(cartItems).where(eq(cartItems.sessionId, sessionId));
+}
+
+async function applyDatabaseInventoryDeduction(
+  orderId: number,
+  items: LocalOrderItem[]
+) {
+  const db = await getDb();
+  if (!db) return;
+  await db.transaction(async tx => {
+    const orderKey = `local-${orderId}`;
+    const existing = await tx
+      .select({ orderKey: inventoryDeductions.orderKey })
+      .from(inventoryDeductions)
+      .where(eq(inventoryDeductions.orderKey, orderKey))
+      .limit(1);
+    if (existing[0]) return;
+
+    for (const item of items) {
+      const [result] = await tx
+        .update(booksTable)
+        .set({ stock: sql`${booksTable.stock} - ${item.quantity}` })
+        .where(
+          and(
+            eq(booksTable.id, item.bookId),
+            gte(booksTable.stock, item.quantity)
+          )
+        );
+      if (!result.affectedRows) {
+        const rows = await tx
+          .select({ stock: booksTable.stock })
+          .from(booksTable)
+          .where(eq(booksTable.id, item.bookId))
+          .limit(1);
+        throw new Error(
+          `Only ${rows[0]?.stock ?? 0} copies of ${item.title} are available`
+        );
+      }
+    }
+    await tx.insert(inventoryDeductions).values({ orderKey });
+  });
+}
+
+export async function completeLocalOrderPayment(orderId: number) {
+  const db = await getDb();
+  return finishLocalSandboxPayment(
+    orderId,
+    db ? items => applyDatabaseInventoryDeduction(orderId, items) : undefined
+  );
+}
+
+export async function markLocalOrderPaymentPaid(
+  orderId: number,
+  sessionId: string
+) {
+  const db = await getDb();
+  return markLocalOrderPaid(
+    orderId,
+    sessionId,
+    db ? items => applyDatabaseInventoryDeduction(orderId, items) : undefined
+  );
 }
 
 function estimateDeliveryDate() {

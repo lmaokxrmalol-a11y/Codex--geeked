@@ -12,26 +12,26 @@ To provision a custom first admin, set `INITIAL_ADMIN_EMAIL` and `INITIAL_ADMIN_
 
 Checkout offers GCash, credit/debit card, and QR Ph. With PayMongo configured (`PAYMONGO_SECRET_KEY`, `PAYMONGO_WEBHOOK_SECRET`, and `PUBLIC_APP_URL`), checkout opens a PayMongo hosted session containing only the selected enabled payment method. Optional `PAYMONGO_PAYMENT_METHOD_TYPES` is a comma-separated list (default `card,gcash,qrph`); methods must also be enabled for the merchant account. In local development, when PayMongo is not configured, online selections simulate completion locally; the Direct Sandbox Test option is development-only. Production checkout requires PayMongo and never marks a mock payment as completed. Configure a PayMongo webhook at `/webhooks/paymongo` for `checkout_session.payment.paid`. A local webhook needs a reachable HTTPS tunnel; the return redirect alone never marks an order paid. Orders and matching `local_transactions` records are persisted to SQLite, and the cart clears only after local payment completion or successful PayMongo session creation. Live payments require explicitly setting `PAYMONGO_MODE=live` and using a live secret and webhook secret. Never put payment credentials in browser code or collect raw card details in this app.
 
-Prices use PHP; orders over ₱1,500 receive free shipping, while other orders are charged ₱99 shipping. Checkout accepts four-digit Philippine postal codes and estimates delivery within 3–7 business days. MySQL remains optional for the book catalog and cart. Database commands are `pnpm db:push`, `pnpm db:migrate`, and `pnpm db:seed`.
+Prices use PHP; orders over ₱1,500 receive free shipping, while other orders are charged ₱99 shipping. Checkout accepts four-digit Philippine postal codes and estimates delivery within 3–7 business days. MySQL remains optional for the book catalog and cart. Inventory starts at 10 copies per starter title, persists in MySQL when `DATABASE_URL` is configured, and otherwise persists in SQLite. Employees and admins can restock from the Account & Support panel; stock updates are reflected in storefront availability. A paid checkout decrements stock once, and checkout/cart operations reject quantities above available stock. After schema changes, run `pnpm db:push` to generate and apply migrations. Database commands are `pnpm db:push`, `pnpm db:migrate`, and `pnpm db:seed`.
 
 ## Architecture
 
 | Area                                       | Responsibility                                                                       |
 | ------------------------------------------ | ------------------------------------------------------------------------------------ |
 | `client/src/App.tsx`                       | Storefront UI, search/category/price filters, sorting, cart/wishlist, and checkout   |
-| `client/src/components/AccountSupport.tsx` | Local login/registration, order history, staff account creation, and support inboxes |
+| `client/src/components/AccountSupport.tsx` | Local login/registration, order history, staff inventory/restocking, and support inboxes |
 | `shared/books.ts`                          | Canonical seed catalog and shared book types                                         |
-| `shared/schema.ts`                         | Shared MySQL catalog, guest cart/wishlist, and role definitions                      |
-| `server/drizzle/`                          | Backend-owned MySQL migrations and snapshots                                         |
-| `server/localStore.ts`                     | SQLite accounts/sessions, support conversations, and transaction history             |
+| `shared/schema.ts`                         | Shared MySQL catalog/inventory, guest cart/wishlist, and role definitions           |
+| `server/drizzle/`                          | Backend-owned MySQL migrations and snapshots                                        |
+| `server/localStore.ts`                     | SQLite accounts/sessions, inventory, conversations, and transaction history          |
 | `server/payments.ts`                       | PayMongo hosted checkout and webhook signature verification                          |
-| `server/db.ts`                             | Drizzle catalog/cart queries and server-side order totals                            |
+| `server/db.ts`                             | Drizzle catalog/inventory/cart queries and server-side order totals                   |
 | `server/routers.ts`                        | Typed tRPC API surface                                                               |
 | `server/seed.ts`                           | Development account and starter-catalog seeding command                              |
 
 ## API surface
 
-- `catalog.list` and `catalog.get` serve database-backed books.
+- `catalog.list` and `catalog.get` serve books with current stock; staff use `catalog.inventory` and `catalog.restockBook`.
 - `store.state` hydrates a guest session's wishlist IDs and cart quantities.
 - `store.toggleWishlist`, `store.addToCart`, `store.setCartQuantity`, and `store.removeFromCart` persist storefront interactions.
 - `auth.register` and `auth.login` create customer accounts and local sessions; the first admin is provisioned from server-only environment variables.

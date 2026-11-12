@@ -24,6 +24,7 @@ export const users = mysqlTable("users", {
 
 export const books = mysqlTable("books", {
   id: varchar("id", { length: 64 }).primaryKey(),
+  slug: varchar("slug", { length: 255 }).notNull().unique(),
   title: varchar("title", { length: 255 }).notNull(),
   author: varchar("author", { length: 255 }).notNull(),
   category: mysqlEnum("category", [
@@ -43,11 +44,18 @@ export const books = mysqlTable("books", {
   coverColor: varchar("coverColor", { length: 16 }).notNull(),
   coverAccent: varchar("coverAccent", { length: 16 }).notNull(),
   coverLabel: varchar("coverLabel", { length: 64 }).notNull(),
+  coverImage: varchar("coverImage", { length: 1024 }),
+  stock: int("stock").notNull().default(10),
   tags: text("tags").notNull(),
   featured: int("featured").notNull().default(0),
   badge: varchar("badge", { length: 64 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const inventoryDeductions = mysqlTable("inventoryDeductions", {
+  orderKey: varchar("orderKey", { length: 128 }).primaryKey(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
 export const wishlistItems = mysqlTable(

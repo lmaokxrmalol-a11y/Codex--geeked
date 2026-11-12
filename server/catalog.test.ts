@@ -40,7 +40,9 @@ describe("codex-geeked catalog", () => {
   it("supports browsing, cart, wishlist, and preview checkout without MySQL", async () => {
     vi.stubEnv("DATABASE_URL", "");
     const sessionId = "local-preview-session-001";
-    expect(await listCatalog()).toHaveLength(16);
+    const catalog = await listCatalog();
+    expect(catalog).toHaveLength(16);
+    expect(catalog.every(book => Number.isInteger(book.stock))).toBe(true);
     await addToCart(sessionId, "project-hail-mary", 1);
     await toggleWishlist(sessionId, "project-hail-mary");
     expect(await getStoreState(sessionId)).toEqual({

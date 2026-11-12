@@ -33,6 +33,10 @@ export default function AccountSupport({
   const transactions = trpc.commerce.transactions.useQuery(undefined, {
     enabled: Boolean(role && role !== "user"),
   });
+  const inventory = trpc.catalog.inventory.useQuery(undefined, {
+    enabled: Boolean(role && role !== "user"),
+    refetchInterval: 10000,
+  });
   const login = trpc.auth.login.useMutation();
   const register = trpc.auth.register.useMutation();
   const logout = trpc.auth.logout.useMutation();
@@ -41,6 +45,7 @@ export default function AccountSupport({
   const setStatus = trpc.support.setStatus.useMutation();
   const createEmployee = trpc.auth.createEmployee.useMutation();
   const setOrderStatus = trpc.commerce.setOrderStatus.useMutation();
+  const restockBook = trpc.catalog.restockBook.useMutation();
   useEffect(() => {
     if (openRequest > 0) setOpen(true);
   }, [openRequest]);
@@ -52,6 +57,31 @@ export default function AccountSupport({
     [conversations.data, selectedConversation]
   );
   const isPending = login.isPending || register.isPending;
+
+  const submitRestock = async (
+    event: React.FormEvent<HTMLFormElement>,
+    bookId: string
+  ) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    setError("");
+    try {
+      await restockBook.mutateAsync({
+        bookId,
+        quantityToAdd: Number(formData.get("quantityToAdd")),
+      });
+      form.reset();
+      await Promise.all([
+        utils.catalog.inventory.invalidate(),
+        utils.catalog.list.invalidate(),
+      ]);
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : "Could not restock book"
+      );
+    }
+  };
 
   const refreshAccount = async () => {
     const { data: user } = await me.refetch();
@@ -602,6 +632,86 @@ export default function AccountSupport({
                       )}
                     </section>
                   </div>
+                  {role !== "user" && (
+                    <section className="inventory-management">
+                      <div className="inventory-management__heading">
+                        <div>
+                          <span className="eyebrow">
+                            <span className="eyebrow__line" /> Store operations
+                          </span>
+                          <h3>Inventory management</h3>
+                        </div>
+                        <span>{inventory.data?.length ?? 0} titles</span>
+                      </div>
+                      {inventory.isLoading ? (
+                        <p className="account-help">Loading inventory…</p>
+                      ) : inventory.isError ? (
+                        <p className="checkout-error">
+                          {inventory.error.message}
+                        </p>
+                      ) : (
+                        <div className="transaction-table-wrap">
+                          <table className="inventory-table">
+                            <thead>
+                              <tr>
+                                <th>Book</th>
+                                <th>Stock</th>
+                                <th>Restock</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {inventory.data?.map(book => (
+                                <tr key={book.id}>
+                                  <td>
+                                    <strong>{book.title}</strong>
+                                    <small>{book.author}</small>
+                                  </td>
+                                  <td>
+                                    <span
+                                      className={`stock-badge${book.stock === 0 ? " is-out" : book.stock < 5 ? " is-low" : ""}`}
+                                    >
+                                      {book.stock === 0
+                                        ? "Out of stock"
+                                        : book.stock < 5
+                                          ? `Low: ${book.stock}`
+                                          : `${book.stock} available`}
+                                    </span>
+                                  </td>
+                                  <td>
+                                    <form
+                                      className="inventory-restock-form"
+                                      onSubmit={event =>
+                                        void submitRestock(event, book.id)
+                                      }
+                                    >
+                                      <label className="sr-only">
+                                        Quantity to add for {book.title}
+                                      </label>
+                                      <input
+                                        name="quantityToAdd"
+                                        type="number"
+                                        min="1"
+                                        max="100000"
+                                        step="1"
+                                        defaultValue="10"
+                                        required
+                                      />
+                                      <button
+                                        className="button button--secondary"
+                                        disabled={restockBook.isPending}
+                                      >
+                                        Restock
+                                      </button>
+                                    </form>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </section>
+                  )}
                 </>
               )}
             </section>

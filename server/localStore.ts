@@ -8,6 +8,7 @@ import { mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
+import { books as seedBooks, type Book } from "../shared/books";
 import type { CheckoutPaymentMethod } from "../shared/payments";
 
 const scrypt = promisify(scryptCallback);
@@ -82,6 +83,10 @@ database.exec(`
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
+  CREATE TABLE IF NOT EXISTS local_inventory (
+    book_id TEXT PRIMARY KEY,
+    stock INTEGER NOT NULL DEFAULT 10 CHECK (stock >= 0)
+  );
   INSERT INTO local_transactions (order_id, amount_cents, payment_method, status, created_at)
     SELECT id, total_cents, COALESCE(payment_method, 'unknown'),
       CASE status WHEN 'paid' THEN 'completed' WHEN 'cancelled' THEN 'cancelled' ELSE 'pending' END,
@@ -91,6 +96,53 @@ database.exec(`
       SELECT 1 FROM local_transactions WHERE local_transactions.order_id = local_orders.id
     );
 `);
+
+const seedInventory = database.prepare(
+  "INSERT OR IGNORE INTO local_inventory (book_id, stock) VALUES (?, 10)"
+);
+for (const book of seedBooks) seedInventory.run(book.id);
+
+export function listLocalInventory(): Array<Book & { stock: number }> {
+  const rows = database
+    .prepare("SELECT book_id, stock FROM local_inventory")
+    .all() as Array<{ book_id: string; stock: number }>;
+  const stockById = new Map(rows.map(row => [row.book_id, Number(row.stock)]));
+  return seedBooks.map(book => ({
+    ...book,
+    slug: book.slug ?? book.id,
+    stock: stockById.get(book.id) ?? 10,
+  }));
+}
+
+export function getLocalBookStock(bookId: string) {
+  const row = database
+    .prepare("SELECT stock FROM local_inventory WHERE book_id = ?")
+    .get(bookId) as { stock: number } | undefined;
+  return row ? Number(row.stock) : null;
+}
+
+export function restockLocalBook(bookId: string, quantityToAdd: number) {
+  const result = database
+    .prepare("UPDATE local_inventory SET stock = stock + ? WHERE book_id = ?")
+    .run(quantityToAdd, bookId);
+  if (Number(result.changes) === 0) throw new Error("Book not found");
+  return getLocalBookStock(bookId);
+}
+
+function deductLocalInventory(items: LocalOrderItem[]) {
+  const updateStock = database.prepare(
+    "UPDATE local_inventory SET stock = stock - ? WHERE book_id = ? AND stock >= ?"
+  );
+  for (const item of items) {
+    const result = updateStock.run(item.quantity, item.bookId, item.quantity);
+    if (Number(result.changes) !== 1) {
+      const available = getLocalBookStock(item.bookId) ?? 0;
+      throw new Error(
+        `Only ${available} copies of ${item.title} are available`
+      );
+    }
+  }
+}
 
 export type LocalRole = "user" | "employee" | "admin";
 export type LocalUser = {
@@ -708,7 +760,37 @@ export function cancelLocalOrder(orderId: number) {
   }
 }
 
-export function markOrderPaid(orderId: number, sessionId: string) {
+export async function markOrderPaid(
+  orderId: number,
+  sessionId: string,
+  applyInventoryDeduction?: (items: LocalOrderItem[]) => Promise<void>
+) {
+  const candidate = database
+    .prepare(
+      "SELECT status, payment_session_id, items_json FROM local_orders WHERE id = ?"
+    )
+    .get(orderId) as
+    | {
+        status: string;
+        payment_session_id: string | null;
+        items_json: string;
+      }
+    | undefined;
+  if (
+    !candidate ||
+    (candidate.status !== "pending" &&
+      !(
+        candidate.status === "paid" &&
+        candidate.payment_session_id === sessionId
+      )) ||
+    candidate.payment_session_id !== sessionId
+  ) {
+    return false;
+  }
+  if (candidate.status === "paid") return true;
+  const items = JSON.parse(candidate.items_json) as LocalOrderItem[];
+  if (applyInventoryDeduction) await applyInventoryDeduction(items);
+
   database.exec("BEGIN IMMEDIATE");
   try {
     const row = database
@@ -730,6 +812,7 @@ export function markOrderPaid(orderId: number, sessionId: string) {
       database.exec("ROLLBACK");
       return false;
     }
+    if (!applyInventoryDeduction) deductLocalInventory(items);
     database
       .prepare(
         "UPDATE local_orders SET status = 'paid', checkout_url = NULL WHERE id = ?"
@@ -748,12 +831,42 @@ export function markOrderPaid(orderId: number, sessionId: string) {
   }
 }
 
-export function completeLocalSandboxPayment(orderId: number) {
+export async function completeLocalSandboxPayment(
+  orderId: number,
+  applyInventoryDeduction?: (items: LocalOrderItem[]) => Promise<void>
+) {
+  const candidate = database
+    .prepare(
+      `SELECT o.status, o.payment_session_id, o.items_json,
+        t.status AS transaction_status
+       FROM local_orders o JOIN local_transactions t ON t.order_id = o.id
+       WHERE o.id = ?`
+    )
+    .get(orderId) as
+    | {
+        status: string;
+        payment_session_id: string | null;
+        items_json: string;
+        transaction_status: string;
+      }
+    | undefined;
+  if (
+    !candidate ||
+    candidate.status !== "pending" ||
+    candidate.payment_session_id !== null ||
+    candidate.transaction_status !== "pending"
+  ) {
+    return false;
+  }
+  const items = JSON.parse(candidate.items_json) as LocalOrderItem[];
+  if (applyInventoryDeduction) await applyInventoryDeduction(items);
+
   database.exec("BEGIN IMMEDIATE");
   try {
     const row = database
       .prepare(
-        `SELECT o.status, o.payment_session_id, t.status AS transaction_status
+        `SELECT o.status, o.payment_session_id,
+          t.status AS transaction_status
          FROM local_orders o JOIN local_transactions t ON t.order_id = o.id
          WHERE o.id = ?`
       )
@@ -773,6 +886,7 @@ export function completeLocalSandboxPayment(orderId: number) {
       database.exec("ROLLBACK");
       return false;
     }
+    if (!applyInventoryDeduction) deductLocalInventory(items);
     database
       .prepare(
         "UPDATE local_orders SET status = 'paid' WHERE id = ? AND status = 'pending'"
